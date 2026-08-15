@@ -1,0 +1,79 @@
+@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800;900&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+    margin: 0;
+    font-family: 'IBM Plex Sans', system-ui, -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+h1, h2, h3, h4, h5, .font-display {
+    font-family: 'Manrope', system-ui, sans-serif;
+    letter-spacing: -0.025em;
+}
+
+.kpi-value {
+    font-family: 'Manrope', system-ui, sans-serif;
+    font-weight: 800;
+    letter-spacing: -0.04em;
+}
+
+code { font-family: source-code-pro, Menlo, Monaco, monospace; }
+
+@layer base {
+    :root {
+        --background: 40 20% 98%;
+        --foreground: 0 0% 9%;
+        --card: 0 0% 100%;
+        --card-foreground: 0 0% 9%;
+        --popover: 0 0% 100%;
+        --popover-foreground: 0 0% 9%;
+        --primary: 0 0% 9%;
+        --primary-foreground: 0 0% 98%;
+        --secondary: 40 15% 95%;
+        --secondary-foreground: 0 0% 9%;
+        --muted: 40 15% 95%;
+        --muted-foreground: 0 0% 40%;
+        --accent: 40 15% 95%;
+        --accent-foreground: 0 0% 9%;
+        --destructive: 0 74% 55%;
+        --destructive-foreground: 0 0% 98%;
+        --border: 30 8% 88%;
+        --input: 30 8% 88%;
+        --ring: 0 0% 9%;
+        --radius: 0.5rem;
+    }
+    .dark {
+        --background: 30 6% 6%;
+        --foreground: 40 10% 96%;
+        --card: 30 6% 9%;
+        --card-foreground: 40 10% 96%;
+        --popover: 30 6% 9%;
+        --popover-foreground: 40 10% 96%;
+        --primary: 40 10% 96%;
+        --primary-foreground: 0 0% 9%;
+        --secondary: 30 5% 14%;
+        --secondary-foreground: 40 10% 96%;
+        --muted: 30 5% 14%;
+        --muted-foreground: 30 5% 60%;
+        --accent: 30 5% 14%;
+        --accent-foreground: 40 10% 96%;
+        --destructive: 0 62% 40%;
+        --destructive-foreground: 40 10% 96%;
+        --border: 30 5% 18%;
+        --input: 30 5% 18%;
+        --ring: 40 10% 80%;
+    }
+}
+
+@layer base {
+    * { @apply border-border; }
+    body { @apply bg-background text-foreground; }
+}
+
+.scroll-thin::-webkit-scrollbar { width: 6px; height: 6px; }
+.scroll-thin::-webkit-scrollbar-thumb { background: hsl(var(--border)); border-radius: 3px; }

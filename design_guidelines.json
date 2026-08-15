@@ -1,0 +1,132 @@
+{
+  "project_name": "RdCloth ERP",
+  "theme": "modern-minimalist-monochrome",
+  "typography": {
+    "heading_font": "Manrope",
+    "body_font": "IBM Plex Sans",
+    "font_rules": [
+      "Use Manrope for all headings (H1-H4) and numerical KPI values with tracking-tight (-0.025em to -0.05em).",
+      "Use IBM Plex Sans for body text, data tables, and forms with normal tracking.",
+      "Never use Inter, Roboto, or generic sans for headings.",
+      "Keep line-height tight (leading-none or leading-tight) for headings, loose (leading-relaxed) for body text."
+    ],
+    "hierarchy": {
+      "h1": "text-3xl sm:text-4xl font-bold tracking-tighter",
+      "h2": "text-2xl sm:text-3xl font-bold tracking-tight",
+      "h3": "text-xl sm:text-2xl font-semibold",
+      "h4": "text-lg font-semibold",
+      "kpi_value": "text-3xl sm:text-4xl lg:text-5xl font-black tracking-tighter",
+      "body": "text-sm sm:text-base text-neutral-600 dark:text-stone-300",
+      "overline": "text-xs font-bold uppercase tracking-[0.2em]"
+    }
+  },
+  "colors": {
+    "strategy": "Swiss & High-Contrast mixed with Soft Utility. High-contrast monochromatic core with semantic color pops for statuses. Strictly avoiding AI-slop purple gradients.",
+    "light_mode": {
+      "background": "bg-stone-50",
+      "surface": "bg-white",
+      "primary": "bg-neutral-900 text-white",
+      "text_main": "text-neutral-900",
+      "text_muted": "text-neutral-500",
+      "border": "border-neutral-200"
+    },
+    "dark_mode": {
+      "background": "bg-stone-950",
+      "surface": "bg-stone-900",
+      "primary": "bg-stone-100 text-stone-900",
+      "text_main": "text-stone-50",
+      "text_muted": "text-stone-400",
+      "border": "border-stone-800"
+    },
+    "semantic_statuses": {
+      "healthy_success": {
+        "light": "bg-emerald-100 text-emerald-800 border border-emerald-200",
+        "dark": "bg-emerald-900/30 text-emerald-400 border border-emerald-900/50"
+      },
+      "warning_low_stock": {
+        "light": "bg-amber-100 text-amber-800 border border-amber-200",
+        "dark": "bg-amber-900/30 text-amber-400 border border-amber-900/50"
+      },
+      "danger_out_of_stock": {
+        "light": "bg-rose-100 text-rose-800 border border-rose-200",
+        "dark": "bg-rose-900/30 text-rose-400 border border-rose-900/50"
+      },
+      "info_processing": {
+        "light": "bg-blue-100 text-blue-800 border border-blue-200",
+        "dark": "bg-blue-900/30 text-blue-400 border border-blue-900/50"
+      }
+    }
+  },
+  "visual_enhancers": {
+    "surfaces": [
+      {
+        "element": "Topbar",
+        "style": "Glassmorphism: backdrop-blur-xl bg-white/70 dark:bg-stone-950/70 with a delicate 1px border-b border-neutral-200 dark:border-stone-800. NEVER fully transparent."
+      },
+      {
+        "element": "Dashboard Cards",
+        "style": "Flat, crisp styling. Solid background with a 1px border. No muddy shadows. On hover, apply a slight -translate-y-[2px] and a crisp shadow (e.g., shadow-sm)."
+      },
+      {
+        "element": "Sidebar",
+        "style": "Solid background. bg-stone-100 dark:bg-stone-900 border-r border-neutral-200 dark:border-stone-800."
+      }
+    ],
+    "charts": {
+      "library": "Recharts",
+      "styling": "Minimalist data presentation. Use stroke width of 2px. Remove grid lines or make them extremely subtle (opacity 0.1). Use custom Tooltips with Glassmorphism background and 1px border. Colors for charts should use monochromatic tones (slate, stone) with one accent color (emerald for profit/healthy margins) to draw attention."
+    },
+    "badges": "Status pills must be fully rounded (rounded-full) and utilize the semantic_statuses color mapping. Use a small dot (w-2 h-2 rounded-full) inside the pill for extra visual feedback if space permits."
+  },
+  "layouts": {
+    "core": "Desktop-first, mobile-friendly dashboard structure. Left persistent sidebar (collapsible on mobile via hamburger) and sticky topbar.",
+    "dashboard_grid": "Use Mode B (High Density Grid). Base: grid-cols-1 md:grid-cols-3 lg:grid-cols-4. Tighter gaps (gap-4 or gap-6). Cards must use h-full to align bottom edges. KPIs are col-span-1. Main charts are col-span-2 or col-span-3. Lists/Feeds are col-span-1 row-span-2.",
+    "spacing": "Maintain generous padding inside cards (p-5 or p-6). Always ensure border elements have inner padding to prevent text collision."
+  },
+  "components": {
+    "ui_library": "shadcn/ui",
+    "rules": [
+      "Use Shadcn standard components (Tables, Cards, Dialogs, Tabs, Forms, Select).",
+      "For Date selection, always use Shadcn Calendar.",
+      "For notifications, use Sonner toast.",
+      "Strip out overly 'Vercel-like' defaults by applying the defined minimalist/monochrome borders and rounded-md (not overly round) borders.",
+      "Use flat, cardless or sharp-edge styles where possible. Limit max border-radius on cards to 8px (rounded-lg)."
+    ]
+  },
+  "accessibility_and_testing": {
+    "contrast": "Ensure text contrast meets APCA/WCAG standards. Focus states must have high contrast (e.g., focus:ring-2 focus:ring-neutral-900 dark:focus:ring-stone-100).",
+    "testing": "All interactive and key informational elements MUST include a data-testid attribute in kebab-case, role-based format (e.g., data-testid='sales-order-table', data-testid='hpp-calculator-submit', data-testid='kpi-revenue-value')."
+  },
+  "media": {
+    "image_urls": {
+      "white_tshirt": {
+        "url": "https://images.pexels.com/photos/12025472/pexels-photo-12025472.jpeg",
+        "description": "White t-shirt flatlay for product inventory placeholders."
+      },
+      "black_tshirt": {
+        "url": "https://images.pexels.com/photos/8532616/pexels-photo-8532616.jpeg",
+        "description": "Black t-shirt for variant product placeholders."
+      },
+      "tote_bag": {
+        "url": "https://images.unsplash.com/photo-1544816155-12df9643f363?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1NjZ8MHwxfHNlYXJjaHwyfHxjYW52YXMlMjB0b3RlJTIwYmFnfGVufDB8fHx8MTc4Njc5MDgwN3ww&ixlib=rb-4.1.0&q=85",
+        "description": "Beige eco tote bag for product placeholders."
+      }
+    },
+    "icons": {
+      "library": "lucide-react",
+      "instruction": "Use lucide-react for all sidebar, action, and metric icons. Keep stroke width consistent (usually 1.5 or 2)."
+    }
+  },
+  "instructions_to_main_agent": [
+    "You are building RdCloth, an ERP for apparel/custom printing.",
+    "Strictly follow the color palette: Avoid colorful gradients. Use a premium, clean, black/white/gray aesthetic with soft charcoal for dark mode.",
+    "Ensure both Light Mode and Dark Mode are fully supported via Tailwind classes (dark: prefix).",
+    "DO NOT apply global transitions like 'transition: all' in CSS. Use specific transitions (e.g., transition-colors) on interactive elements.",
+    "DO NOT center align the app container. Text should flow naturally (left-aligned).",
+    "Implement the HPP calculator, Pricing Simulator, and BEP calculator as interactive forms with real-time UI feedback (use semantic colors for 'Margin Health' indicators).",
+    "Construct the Dashboard with the Bento Grid methodology defined in layouts.",
+    "Incorporate the required 'data-testid' attributes extensively to ensure the UI is testable.",
+    "Do not use placeholder text for imagery. Use the provided Unsplash/Pexels image URLs for products.",
+    "When applying overlays or sticky navbars, use a backdrop blur with partial opacity (Glassmorphism), never fully transparent."
+  ]
+}
