@@ -25,6 +25,8 @@ Sistem ERP (Enterprise Resource Planning) berbasis web untuk manajemen operasion
 
 ## Cara Menjalankan Aplikasi (Lokal)
 
+Dokumentasi proyek lengkap, alur kerja setiap modul, ringkasan API, role, environment variables, dan batasan versi demo tersedia di [docs/PROJECT_DOCUMENTATION.md](docs/PROJECT_DOCUMENTATION.md).
+
 ### 1. Backend Setup
 
 ```bash
