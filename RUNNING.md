@@ -41,6 +41,12 @@ network access configuration will stop startup instead of silently using mock da
 In MongoDB Atlas, add the development machine IP under Network Access and URL-encode
 reserved password characters such as `@`, `:`, `/`, and `#`.
 
+For deployment, configure `MONGO_URL`, `DB_NAME`, `JWT_SECRET`, `OWNER_EMAIL`,
+`OWNER_PASSWORD`, and `SKIP_DEMO_SEED` as environment variables in the hosting
+platform. Do not commit `backend/.env`; deployment platforms do not receive ignored
+local files from GitHub. Once configured, every deployment uses the same Atlas
+database and existing data remains available.
+
 Note: For local dev you can set `SKIP_DEMO_SEED=1` to avoid seeding if Mongo is not available.
 
 4. Start the backend:
