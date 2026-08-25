@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useCallback, useState, useEffect } from "react";
 import { PageHeader, DataTable, Modal, Field, Input, Select, Button, StatusPill, useCRUD, Plus, Trash2 } from "./_shared";
 import { api, fmtIDR, fmtNum, fmtDate, formatErr } from "@/lib/api";
 import { downloadCSV } from "@/lib/export";
@@ -11,8 +11,8 @@ export function Sales() {
   const { rows: customers } = useCRUD("customers");
   const { rows: marketplaces } = useCRUD("marketplaces");
 
-  const reload = () => api.get("/sales_orders").then(r=>setRows(r.data));
-  useEffect(() => { reload(); }, []);
+  const reload = useCallback(() => api.get("/sales_orders").then(r=>setRows(r.data)), []);
+  useEffect(() => { reload(); }, [reload]);
 
   const cancel = async (id) => {
     if (!confirm("Batalkan order ini? Stok akan dikembalikan dan cash akan di-refund.")) return;
@@ -176,12 +176,12 @@ export function Finance() {
   const [expModal, setExpModal] = useState(null);
   const { rows: expCats } = useCRUD("expense_categories");
 
-  const reload = async () => {
+  const reload = useCallback(async () => {
     setTxns((await api.get("/financial_transactions")).data);
     setExpenses((await api.get("/expenses")).data);
     reloadAcc();
-  };
-  useEffect(() => { reload(); }, []);
+  }, [reloadAcc]);
+  useEffect(() => { reload(); }, [reload]);
 
   const saveTxn = async () => {
     try { await api.post("/financial_transactions", txnModal); toast.success("Transaksi tersimpan"); setTxnModal(null); reload(); }

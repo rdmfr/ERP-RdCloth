@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useCallback, useState, useEffect } from "react";
 import { PageHeader, Field, Input, Button } from "./_shared";
 import { api, fmtIDR } from "@/lib/api";
 import { downloadCSV, printPage } from "@/lib/export";
@@ -216,11 +216,11 @@ export function Reports() {
   const [pl, setPl] = useState(null);
   const [start, setStart] = useState("");
   const [end, setEnd] = useState("");
-  const load = async () => {
+  const load = useCallback(async () => {
     const { data } = await api.get(`/reports/profit_loss?start=${start}&end=${end}`);
     setPl(data);
-  };
-  useEffect(() => { load(); }, []);
+  }, [start, end]);
+  useEffect(() => { load(); }, [load]);
   const exportCSV = () => {
     const q = new URLSearchParams(); if (start) q.set("start", start); if (end) q.set("end", end);
     downloadCSV(`/reports/export/profit_loss?${q.toString()}`, "profit_loss.csv");

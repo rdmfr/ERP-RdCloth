@@ -29,11 +29,17 @@ pip install -r requirements.txt
 3. Create an env file or set env vars. Example `.env` values:
 
 ```
-MONGO_URL=mongodb://localhost:27017
+# MongoDB Atlas (replace <db_password>; URL-encode special characters)
+MONGO_URL=mongodb+srv://rdmfr59_db_user:<db_password>@cluster0.zygezd2.mongodb.net/?retryWrites=true&w=majority
 DB_NAME=rdcloth
 JWT_SECRET=change-me-to-a-secure-random-value
 SKIP_DEMO_SEED=1  # optional: skip demo data seeding on startup
 ```
+
+The backend pings MongoDB during startup. For an Atlas URL, invalid credentials or
+network access configuration will stop startup instead of silently using mock data.
+In MongoDB Atlas, add the development machine IP under Network Access and URL-encode
+reserved password characters such as `@`, `:`, `/`, and `#`.
 
 Note: For local dev you can set `SKIP_DEMO_SEED=1` to avoid seeding if Mongo is not available.
 

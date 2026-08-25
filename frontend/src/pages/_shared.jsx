@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { api, fmtIDR, fmtNum, formatErr } from "@/lib/api";
 import { toast } from "sonner";
 import { Plus, Edit, Trash2, X } from "lucide-react";
@@ -105,13 +105,13 @@ export function StatusPill({ status }) {
 export function useCRUD(endpoint) {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
-  const reload = async () => {
+  const reload = useCallback(async () => {
     setLoading(true);
     try { const r = await api.get(`/${endpoint}`); setRows(r.data); }
     catch (e) { toast.error(formatErr(e.response?.data?.detail)); }
     finally { setLoading(false); }
-  };
-  useEffect(() => { reload(); }, []);
+  }, [endpoint]);
+  useEffect(() => { reload(); }, [reload]);
   const save = async (data, id) => {
     try {
       if (id) await api.put(`/${endpoint}/${id}`, data);

@@ -6,6 +6,7 @@ load_dotenv(ROOT_DIR / '.env')
 import os
 import uuid
 import logging
+import math
 import bcrypt
 import jwt
 from datetime import datetime, timezone, timedelta
@@ -38,6 +39,8 @@ if not use_mock:
             connectTimeoutMS=int(os.environ.get("MONGO_CONNECT_TIMEOUT_MS", "1500")),
         )
     except Exception:
+        if MONGO_URL.startswith("mongodb+srv://"):
+            raise
         use_mock = True
 
 if use_mock:
@@ -66,6 +69,21 @@ def new_id() -> str:
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+def nonnegative(value: Any, field: str) -> float:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        raise HTTPException(400, f"{field} must be a number")
+    if not math.isfinite(number) or number < 0:
+        raise HTTPException(400, f"{field} must be non-negative")
+    return number
+
+def positive(value: Any, field: str) -> float:
+    number = nonnegative(value, field)
+    if number <= 0:
+        raise HTTPException(400, f"{field} must be greater than zero")
+    return number
 
 def hash_password(pwd: str) -> str:
     return bcrypt.hashpw(pwd.encode(), bcrypt.gensalt()).decode()
@@ -357,6 +375,8 @@ async def adjust_material(body: MaterialAdjustIn, user: dict = Depends(require_m
     if not m: raise HTTPException(404, "Material not found")
     before = float(m.get("stock", 0))
     after = before + body.quantity
+    if not math.isfinite(body.quantity) or after < 0:
+        raise HTTPException(400, "Stock cannot be negative")
     await db.materials.update_one({"id": body.material_id}, {"$set": {"stock": after, "updated_at": now_iso()}})
     await record_movement("material", body.material_id, "manual", body.quantity, body.type, before, after, user["id"], body.notes)
     return {"ok": True, "before": before, "after": after}
@@ -376,6 +396,8 @@ async def adjust_variant(body: VariantAdjustIn, user: dict = Depends(require_mod
     for v in variants:
         if v["sku"] == body.variant_sku:
             before = float(v.get("stock", 0))
+            if not math.isfinite(body.quantity) or before + body.quantity < 0:
+                raise HTTPException(400, "Stock cannot be negative")
             v["stock"] = before + body.quantity
             after = v["stock"]
             break
@@ -463,41 +485,61 @@ async def complete_production(pid: str, body: Dict[str, Any], user: dict = Depen
     if not po: raise HTTPException(404, "Not found")
     if po.get("status") == "completed":
         raise HTTPException(400, "Already completed")
-    qty_passed = float(body.get("quantity_passed", po.get("quantity", 0)))
-    qty_rejected = float(body.get("quantity_rejected", 0))
+    planned_qty = positive(po.get("quantity", 0), "quantity")
+    qty_passed = nonnegative(body.get("quantity_passed", planned_qty), "quantity_passed")
+    qty_rejected = nonnegative(body.get("quantity_rejected", 0), "quantity_rejected")
+    if not math.isclose(qty_passed + qty_rejected, planned_qty, rel_tol=0, abs_tol=1e-9):
+        raise HTTPException(400, "Passed and rejected quantity must equal planned quantity")
     variant_sku = body.get("variant_sku") or po.get("variant_sku")
     product_id = po.get("product_id")
     bom_items = po.get("bom_items", [])
+    if not bom_items:
+        raise HTTPException(400, "Production order has no BOM items")
+    material_requirements = {}
+    for bi in bom_items:
+        mid = bi.get("material_id")
+        if not mid:
+            raise HTTPException(400, "BOM item is missing material")
+        per_unit = positive(bi.get("quantity", 0), "BOM quantity")
+        material_requirements[mid] = material_requirements.get(mid, 0) + per_unit * (qty_passed + qty_rejected)
+    for mid, needed in material_requirements.items():
+        material = await db.materials.find_one({"id": mid})
+        if not material:
+            raise HTTPException(400, f"Material {mid} not found")
+        if float(material.get("stock", 0)) < needed:
+            raise HTTPException(400, f"Insufficient material stock for {mid}")
+    if not product_id or not variant_sku:
+        raise HTTPException(400, "Production output product and variant are required")
+    product = await db.products.find_one({"id": product_id})
+    if not product or not any(v.get("sku") == variant_sku for v in product.get("variants", [])):
+        raise HTTPException(400, "Production output variant not found")
     total_material_cost = 0.0
     # consume materials
     for bi in bom_items:
-        mid = bi["material_id"]; per_unit = float(bi["quantity"])
+        mid = bi["material_id"]; per_unit = positive(bi.get("quantity", 0), "BOM quantity")
         needed = per_unit * (qty_passed + qty_rejected)
         m = await db.materials.find_one({"id": mid})
-        if not m: continue
+        if not m: raise HTTPException(400, f"Material {mid} not found")
         before = float(m.get("stock", 0))
         after = before - needed
         total_material_cost += needed * float(m.get("cost", 0))
         await db.materials.update_one({"id": mid}, {"$set": {"stock": after, "updated_at": now_iso()}})
         await record_movement("material", mid, pid, -needed, "production", before, after, user["id"], f"Prod {po['prod_number']}")
     # add finished goods
-    if product_id and variant_sku:
-        p = await db.products.find_one({"id": product_id})
-        if p:
-            variants = p.get("variants", [])
-            unit_cost = (total_material_cost / (qty_passed + qty_rejected)) if (qty_passed + qty_rejected) > 0 else 0
-            for v in variants:
-                if v["sku"] == variant_sku:
-                    before = float(v.get("stock", 0))
-                    v["stock"] = before + qty_passed
-                    after = v["stock"]
-                    # weighted avg cost
-                    old_val = before * float(v.get("cost", 0))
-                    new_val = qty_passed * unit_cost
-                    v["cost"] = (old_val + new_val) / after if after > 0 else unit_cost
-                    break
-            await db.products.update_one({"id": product_id}, {"$set": {"variants": variants, "updated_at": now_iso()}})
-            await record_movement("product", product_id, variant_sku, qty_passed, "production", before, after, user["id"], f"Prod {po['prod_number']}")
+    p = product
+    variants = p.get("variants", [])
+    unit_cost = (total_material_cost / (qty_passed + qty_rejected)) if (qty_passed + qty_rejected) > 0 else 0
+    for v in variants:
+        if v["sku"] == variant_sku:
+            before = float(v.get("stock", 0))
+            v["stock"] = before + qty_passed
+            after = v["stock"]
+            old_val = before * float(v.get("cost", 0))
+            new_val = qty_passed * unit_cost
+            v["cost"] = (old_val + new_val) / after if after > 0 else unit_cost
+            break
+    await db.products.update_one({"id": product_id}, {"$set": {"variants": variants, "updated_at": now_iso()}})
+    await record_movement("product", product_id, variant_sku, qty_passed, "production", before, after, user["id"], f"Prod {po['prod_number']}")
     await db.production_orders.update_one({"id": pid}, {"$set": {
         "status": "completed", "quantity_passed": qty_passed, "quantity_rejected": qty_rejected,
         "material_cost": total_material_cost, "completed_at": now_iso(), "updated_at": now_iso(),
@@ -515,9 +557,32 @@ async def create_sales(body: Dict[str, Any], user: dict = Depends(require_module
     body["order_number"] = body.get("order_number") or f"SO-{datetime.now().strftime('%y%m%d')}-{body['id'][:4].upper()}"
     items = body.get("items", [])
     subtotal = 0.0; cogs = 0.0
+    if not items:
+        raise HTTPException(400, "At least one sales item is required")
+    stock_by_variant = {}
+    product_by_id = {}
+    for it in items:
+        pid = it.get("product_id")
+        vsku = it.get("variant_sku")
+        qty = positive(it.get("quantity", 0), "Item quantity")
+        nonnegative(it.get("selling_price", 0), "Selling price")
+        p = await db.products.find_one({"id": pid})
+        if not p:
+            raise HTTPException(400, f"Product {pid} not found")
+        variant = next((v for v in p.get("variants", []) if v.get("sku") == vsku), None)
+        if not variant:
+            raise HTTPException(400, f"Variant {vsku} not found")
+        key = (pid, vsku)
+        stock_by_variant[key] = stock_by_variant.get(key, 0) + qty
+        product_by_id[pid] = p
+    for (pid, vsku), requested in stock_by_variant.items():
+        p = product_by_id[pid]
+        variant = next(v for v in p.get("variants", []) if v.get("sku") == vsku)
+        if float(variant.get("stock", 0)) < requested:
+            raise HTTPException(400, f"Insufficient stock for {vsku}")
     # deduct inventory
     for it in items:
-        pid = it["product_id"]; vsku = it["variant_sku"]; qty = float(it["quantity"])
+        pid = it["product_id"]; vsku = it["variant_sku"]; qty = positive(it["quantity"], "Item quantity")
         p = await db.products.find_one({"id": pid})
         if not p: raise HTTPException(400, f"Product {pid} not found")
         variants = p.get("variants", [])
