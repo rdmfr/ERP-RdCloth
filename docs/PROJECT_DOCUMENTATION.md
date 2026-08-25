@@ -11,7 +11,7 @@ RdCloth ERP adalah aplikasi web untuk operasional bisnis apparel dan konveksi. A
 - Yarn 1.x
 - MongoDB lokal atau MongoDB yang dapat dijangkau melalui `MONGO_URL`
 
-Backend memiliki fallback `mongomock_motor` untuk development lokal ketika MongoDB tidak tersedia. Untuk data yang persisten, gunakan MongoDB.
+Backend memiliki fallback `mongomock_motor` untuk development lokal ketika MongoDB tidak tersedia. Untuk data yang persisten, gunakan MongoDB Atlas atau MongoDB terkelola. Saat `MONGO_URL` menggunakan `mongodb+srv`, kegagalan koneksi akan menghentikan startup dan tidak beralih ke mock.
 
 ### Backend
 
@@ -64,25 +64,25 @@ Panduan run yang lebih singkat tersedia di [RUNNING.md](../RUNNING.md).
 
 Backend membaca konfigurasi berikut:
 
-| Variable | Default | Keterangan |
-| --- | --- | --- |
-| `MONGO_URL` | `mongodb://localhost:27017` | Connection string MongoDB |
-| `DB_NAME` | `rdcloth` | Nama database |
-| `JWT_SECRET` | development fallback | Secret untuk token JWT; wajib diganti di production |
-| `OWNER_EMAIL` | `rddev@gmail.com` | Email owner saat seed |
-| `OWNER_PASSWORD` | `rdcloth2026` | Password owner saat seed |
-| `SKIP_DEMO_SEED` | kosong | Isi `1` untuk melewati seed demo |
+| Variable         | Default              | Keterangan                                          |
+| ---------------- | -------------------- | --------------------------------------------------- |
+| `MONGO_URL`      | wajib diisi          | Connection string MongoDB atau Atlas                |
+| `DB_NAME`        | `rdcloth`            | Nama database                                       |
+| `JWT_SECRET`     | development fallback | Secret untuk token JWT; wajib diganti di production |
+| `OWNER_EMAIL`    | `rddev@gmail.com`    | Email owner saat seed                               |
+| `OWNER_PASSWORD` | `rdcloth2026`        | Password owner saat seed                            |
+| `SKIP_DEMO_SEED` | kosong               | Isi `1` untuk melewati seed demo                    |
 
 Jangan commit file `.env` atau secret production.
 
 ## Demo Accounts
 
-| Role | Email | Password | Fokus akses |
-| --- | --- | --- | --- |
-| Owner | `rddev@gmail.com` | `rdcloth2026` | Semua modul dan konfigurasi |
-| Admin | `admin@rdcloth.id` | `admin123` | Sales, products, inventory, customers, suppliers, materials |
-| Production | `production@rdcloth.id` | `production123` | Production, inventory, products, materials |
-| Finance | `finance@rdcloth.id` | `finance123` | Finance, reports, purchasing, sales, assets |
+| Role       | Email                   | Password        | Fokus akses                                                 |
+| ---------- | ----------------------- | --------------- | ----------------------------------------------------------- |
+| Owner      | `rddev@gmail.com`       | `rdcloth2026`   | Semua modul dan konfigurasi                                 |
+| Admin      | `admin@rdcloth.id`      | `admin123`      | Sales, products, inventory, customers, suppliers, materials |
+| Production | `production@rdcloth.id` | `production123` | Production, inventory, products, materials                  |
+| Finance    | `finance@rdcloth.id`    | `finance123`    | Finance, reports, purchasing, sales, assets                 |
 
 Password di atas hanya untuk development/demo. Ganti atau nonaktifkan sebelum deployment.
 
@@ -158,20 +158,20 @@ Owner dapat mengelola kategori, marketplace, expense category, user, dan audit l
 
 API menggunakan prefix `/api` dan autentikasi Bearer token atau cookie `access_token`.
 
-| Area | Endpoint utama |
-| --- | --- |
-| Auth | `POST /api/auth/login`, `GET /api/auth/me`, `POST /api/auth/logout` |
-| Dashboard | `GET /api/dashboard/kpi`, `GET /api/dashboard/charts` |
-| Master data | `/api/products`, `/api/materials`, `/api/suppliers`, `/api/customers`, `/api/assets` |
-| Inventory | `GET /api/inventory/movements`, `POST /api/inventory/products/adjust`, `POST /api/inventory/materials/adjust` |
-| Purchasing | `/api/purchase_orders`, `POST /api/purchase_orders/{id}/receive` |
-| Production | `/api/production_orders`, `POST /api/production_orders/{id}/complete` |
-| Sales | `/api/sales_orders`, `POST /api/sales_orders/{id}/cancel` |
-| Import | `POST /api/marketplace/import` |
-| Finance | `/api/accounts`, `/api/financial_transactions`, `/api/expenses` |
-| Reports | `GET /api/reports/profit_loss`, `/api/reports/export/*` |
-| Business tools | `POST /api/hpp/calculate`, `POST /api/hpp/simulate`, `POST /api/bep/calculate` |
-| Administration | `GET /api/users`, `POST /api/users`, `GET /api/audit_logs` |
+| Area           | Endpoint utama                                                                                                |
+| -------------- | ------------------------------------------------------------------------------------------------------------- |
+| Auth           | `POST /api/auth/login`, `GET /api/auth/me`, `POST /api/auth/logout`                                           |
+| Dashboard      | `GET /api/dashboard/kpi`, `GET /api/dashboard/charts`                                                         |
+| Master data    | `/api/products`, `/api/materials`, `/api/suppliers`, `/api/customers`, `/api/assets`                          |
+| Inventory      | `GET /api/inventory/movements`, `POST /api/inventory/products/adjust`, `POST /api/inventory/materials/adjust` |
+| Purchasing     | `/api/purchase_orders`, `POST /api/purchase_orders/{id}/receive`                                              |
+| Production     | `/api/production_orders`, `POST /api/production_orders/{id}/complete`                                         |
+| Sales          | `/api/sales_orders`, `POST /api/sales_orders/{id}/cancel`                                                     |
+| Import         | `POST /api/marketplace/import`                                                                                |
+| Finance        | `/api/accounts`, `/api/financial_transactions`, `/api/expenses`                                               |
+| Reports        | `GET /api/reports/profit_loss`, `/api/reports/export/*`                                                       |
+| Business tools | `POST /api/hpp/calculate`, `POST /api/hpp/simulate`, `POST /api/bep/calculate`                                |
+| Administration | `GET /api/users`, `POST /api/users`, `GET /api/audit_logs`                                                    |
 
 Swagger/OpenAPI tersedia di `http://127.0.0.1:8000/docs` saat backend berjalan.
 
@@ -215,17 +215,72 @@ Dependency validation:
 python -m pip check
 ```
 
-## Current Limitations
+## Current Limitations and Required Improvements
 
-The current demo release still needs follow-up work before production use:
+### P0 - Wajib sebelum production
 
-- Global search and notification buttons are present in the UI but not yet connected to a full workflow.
-- Sales, Purchase Order, and Production Order have limited editing capabilities after creation.
-- Numeric input and stock transition validation should be strengthened on both frontend and backend.
-- BEP should show an explicit warning when selling price is not greater than variable cost.
-- Business profile editing and full user lifecycle management are still limited.
-- Demo credentials and development JWT defaults must be replaced in a real deployment.
+- Ganti `JWT_SECRET`, `OWNER_PASSWORD`, dan seluruh akun demo. Jangan menaruh secret di Git.
+- Batasi CORS ke domain frontend resmi dan gunakan HTTPS.
+- Tambahkan rate limiting dan audit untuk login yang gagal.
+- Gunakan MongoDB transaction/session untuk sales, cancel sales, receive PO, production complete, dan marketplace import. Preflight validation sudah mencegah sebagian mutasi parsial, tetapi belum menggantikan transaction.
+- Buat backup Atlas terjadwal, uji restore, dan tentukan retention policy.
+- Pastikan `SKIP_DEMO_SEED=1` setelah data awal dibuat.
+
+### P1 - Wajib untuk operasional harian
+
+- Validasi numerik dan status transition harus konsisten di frontend dan backend.
+- Tolak financial transaction dengan tipe tidak dikenal, nominal negatif, atau account yang tidak ada.
+- Cegah marketplace import duplikat berdasarkan `order_number` dan sediakan laporan item gagal.
+- Jangan melewati material PO yang tidak ditemukan secara diam-diam; proses harus gagal dengan alasan yang jelas.
+- Tambahkan pagination, filter tanggal/status, dan pencarian server-side untuk tabel besar.
+- Perbaiki export Sales agar role Admin yang dapat melihat Sales juga memiliki izin export yang sesuai.
+
+### P2 - Fitur yang belum lengkap
+
+- Global search dan notification di topbar masih berupa UI tanpa workflow penuh.
+- Sales, Purchase Order, dan Production Order belum memiliki edit/reopen workflow yang lengkap.
+- Business profile masih ditampilkan statis dan belum dapat diedit penuh.
+- User lifecycle belum mencakup edit, nonaktifkan, reset password, dan revoke session.
+- BEP belum memberi warning eksplisit ketika selling price tidak lebih besar dari variable cost.
+
+## Data Integrity Rules
+
+- Semua stok, saldo account, dan inventory movement harus berubah dalam satu unit proses.
+- Setiap transaksi keuangan operasional harus memiliki `ref_type` dan `ref_id` yang dapat dilacak.
+- Endpoint create tidak boleh dipercaya menghitung total dari frontend; backend harus menghitung ulang.
+- Endpoint import harus idempotent agar retry tidak menggandakan order atau pemasukan.
+- Jangan menghapus master data yang sudah dipakai transaksi tanpa kebijakan archive/soft delete.
+
+## Test Matrix
+
+Test yang tersedia saat ini mencakup pencegahan mutasi stok parsial pada Sales dan Production:
+
+```bash
+cd ..
+.venv/Scripts/python.exe -m pytest -q tests/test_business_invariants.py
+```
+
+Sebelum release, tambahkan test untuk:
+
+- login berhasil/gagal, token kedaluwarsa, dan seluruh kombinasi RBAC;
+- create, cancel, dan duplicate retry pada Sales;
+- receive PO, weighted average cost, dan insufficient material;
+- production passed/rejected, BOM tidak valid, dan concurrent stock update;
+- financial transaction, expense, refund, dan saldo account;
+- marketplace import valid, invalid, duplicate, dan partial result;
+- report date range, CSV export, dan frontend API contract.
 
 ## Deployment Notes
 
-For production, use a managed MongoDB instance, a strong random `JWT_SECRET`, HTTPS, restricted CORS, separate frontend/backend environment variables, and a process manager for Uvicorn. Disable demo seeding with `SKIP_DEMO_SEED=1` after the initial setup.
+Untuk production, set environment variable berikut di platform hosting, bukan di repository:
+
+```text
+MONGO_URL=mongodb+srv://...
+DB_NAME=rdcloth
+JWT_SECRET=<random-secret>
+OWNER_EMAIL=<production-owner-email>
+OWNER_PASSWORD=<strong-password>
+SKIP_DEMO_SEED=1
+```
+
+Konfigurasi tersebut cukup dilakukan satu kali pada environment production. Setiap deploy berikutnya akan memakai database Atlas yang sama sehingga data tidak hilang. File `backend/.env` bersifat lokal dan sengaja tidak ikut push GitHub. Verifikasi deployment dengan `GET /api/`, login owner, membuat satu record uji, lalu pastikan record tersebut terlihat di Atlas.

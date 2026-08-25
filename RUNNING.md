@@ -62,6 +62,16 @@ curl http://127.0.0.1:8000/api/
 # expected: {"app":"RdCloth ERP","status":"ok"}
 ```
 
+Untuk memverifikasi bahwa backend benar-benar memakai Atlas, jalankan dari folder `backend`:
+
+```powershell
+python -c "import server; print('Atlas:', not server.use_mock)"
+```
+
+Hasil yang benar adalah `Atlas: True`. Jika URI memakai `mongodb+srv` tetapi username,
+password, atau Network Access salah, backend akan gagal start dan menampilkan error
+autentikasi/koneksi.
+
 Frontend
 
 1. Install dependencies (only once or when package.json changes):
