@@ -38,8 +38,8 @@ if not use_mock:
         from pymongo import MongoClient
         test_client = MongoClient(
             MONGO_URL,
-            serverSelectionTimeoutMS=1000,
-            connectTimeoutMS=1000,
+            serverSelectionTimeoutMS=int(os.environ.get("MONGO_SERVER_SELECTION_TIMEOUT_MS", "10000")),
+            connectTimeoutMS=int(os.environ.get("MONGO_CONNECT_TIMEOUT_MS", "10000")),
         )
         test_client.admin.command('ping')
         test_client.close()
