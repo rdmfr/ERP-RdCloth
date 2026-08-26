@@ -1,5 +1,6 @@
 import os
 import unittest
+from bson import ObjectId
 
 os.environ.setdefault("MONGO_URL", "mongodb://localhost:27017")
 os.environ.setdefault("DB_NAME", "rdcloth_test")
@@ -62,6 +63,10 @@ class BusinessInvariantTests(unittest.IsolatedAsyncioTestCase):
         product = await server.db.products.find_one({"id": "product-1"})
         self.assertEqual(material["stock"], 1)
         self.assertEqual(product["variants"][0]["stock"], 0)
+
+    def test_audit_values_are_json_safe(self):
+        value = server.json_safe({"id": ObjectId("507f1f77bcf86cd799439011")})
+        self.assertEqual(value["id"], "507f1f77bcf86cd799439011")
 
 
 if __name__ == "__main__":

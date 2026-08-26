@@ -7,8 +7,8 @@ import { toast } from "sonner";
 export default function Login() {
   const { login } = useAuth();
   const nav = useNavigate();
-  const [email, setEmail] = useState("rddev@gmail.com");
-  const [pwd, setPwd] = useState("rdcloth2026");
+  const [email, setEmail] = useState("");
+  const [pwd, setPwd] = useState("");
   const [loading, setLoading] = useState(false);
 
   const submit = async (e) => {
@@ -58,13 +58,6 @@ export default function Login() {
           <button data-testid="login-submit" disabled={loading} className="w-full py-2.5 rounded-md bg-neutral-900 dark:bg-stone-100 text-white dark:text-stone-900 font-semibold text-sm hover:opacity-90 transition-opacity disabled:opacity-50">
             {loading ? "Memuat..." : "Masuk"}
           </button>
-          <div className="text-xs text-muted-foreground border-t border-border pt-4">
-            <div className="font-semibold mb-1">Demo Akun</div>
-            <div>Owner: rddev@gmail.com · rdcloth2026</div>
-            <div>Admin: admin@rdcloth.id · admin123</div>
-            <div>Production: production@rdcloth.id · production123</div>
-            <div>Finance: finance@rdcloth.id · finance123</div>
-          </div>
         </form>
       </div>
     </div>

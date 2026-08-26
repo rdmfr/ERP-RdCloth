@@ -15,12 +15,16 @@ from fastapi import FastAPI, APIRouter, HTTPException, Depends, Request, Respons
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, EmailStr, ConfigDict
 from motor.motor_asyncio import AsyncIOMotorClient
+from bson import ObjectId
 
 # ---------- Config ----------
 MONGO_URL = os.environ['MONGO_URL']
 DB_NAME = os.environ['DB_NAME']
 JWT_SECRET = os.environ['JWT_SECRET']
 JWT_ALG = "HS256"
+ENVIRONMENT = os.environ.get("ENVIRONMENT", "development").lower()
+if ENVIRONMENT == "production" and len(JWT_SECRET) < 32:
+    raise RuntimeError("JWT_SECRET must contain at least 32 characters in production")
 
 use_mock = os.environ.get("USE_MOCK_DB", "").lower() in ("1", "true", "yes")
 if not use_mock:
@@ -54,7 +58,7 @@ api = APIRouter(prefix="/api")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[origin.strip() for origin in os.environ.get("CORS_ORIGINS", "http://localhost:3000").split(",") if origin.strip()],
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -69,6 +73,17 @@ def new_id() -> str:
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+def json_safe(value: Any) -> Any:
+    if isinstance(value, ObjectId):
+        return str(value)
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, dict):
+        return {key: json_safe(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [json_safe(item) for item in value]
+    return value
 
 def nonnegative(value: Any, field: str) -> float:
     try:
@@ -178,7 +193,7 @@ async def audit(user: dict, action: str, entity: str, entity_id: str = "", old: 
     await db.audit_logs.insert_one({
         "id": new_id(), "user_id": user["id"], "user_email": user["email"],
         "action": action, "entity": entity, "entity_id": entity_id,
-        "old_value": old, "new_value": new, "created_at": now_iso(),
+        "old_value": json_safe(old), "new_value": json_safe(new), "created_at": now_iso(),
     })
 
 # ---------- AUTH ----------
@@ -194,7 +209,7 @@ async def login(body: LoginIn, response: Response, request: Request):
     except Exception:
         user = None
 
-    if not user:
+    if not user and ENVIRONMENT != "production":
         user = FALLBACK_USERS.get(email)
 
     if not user or not verify_password(body.password, user["password_hash"]):
@@ -441,10 +456,15 @@ async def receive_po(po_id: str, user: dict = Depends(require_module("purchasing
         raise HTTPException(400, "Already received")
     for item in po.get("items", []):
         mid = item.get("material_id")
-        qty = float(item.get("quantity", 0))
-        if not mid: continue
+        qty = positive(item.get("quantity", 0), "Purchase quantity")
+        if not mid:
+            raise HTTPException(400, "Purchase order item is missing material")
+        if not await db.materials.find_one({"id": mid}):
+            raise HTTPException(400, f"Material {mid} not found")
+    for item in po.get("items", []):
+        mid = item.get("material_id")
+        qty = positive(item.get("quantity", 0), "Purchase quantity")
         m = await db.materials.find_one({"id": mid})
-        if not m: continue
         before = float(m.get("stock", 0))
         after = before + qty
         # update weighted average cost
@@ -555,6 +575,9 @@ async def list_sales():
 async def create_sales(body: Dict[str, Any], user: dict = Depends(require_module("sales"))):
     body["id"] = body.get("id") or new_id()
     body["order_number"] = body.get("order_number") or f"SO-{datetime.now().strftime('%y%m%d')}-{body['id'][:4].upper()}"
+    existing = await db.sales_orders.find_one({"order_number": body["order_number"]})
+    if existing:
+        raise HTTPException(409, "Order number already exists")
     items = body.get("items", [])
     subtotal = 0.0; cogs = 0.0
     if not items:
@@ -642,7 +665,14 @@ async def create_sales(body: Dict[str, Any], user: dict = Depends(require_module
 
 # ---------- FINANCE ----------
 async def create_financial_transaction(user, ttype, amount, account_id, description, ref_type, ref_id):
+    if ttype not in {"income", "expense", "transfer", "owner_investment", "owner_withdrawal"}:
+        raise HTTPException(400, "Invalid transaction type")
+    amount = positive(amount, "Transaction amount")
     account_id = account_id or await get_default_account_id()
+    if not account_id:
+        raise HTTPException(400, "A financial account is required")
+    if not await db.accounts.find_one({"id": account_id}):
+        raise HTTPException(400, "Financial account not found")
     txn = {
         "id": new_id(), "type": ttype, "amount": float(amount),
         "account_id": account_id, "description": description,
@@ -684,7 +714,7 @@ async def create_expense(body: Dict[str, Any], user: dict = Depends(require_modu
     body["id"] = body.get("id") or new_id()
     body["created_at"] = now_iso()
     body["date"] = body.get("date") or now_iso()
-    body["amount"] = float(body.get("amount", 0))
+    body["amount"] = positive(body.get("amount", 0), "Expense amount")
     await db.expenses.insert_one(body)
     await create_financial_transaction(user, "expense", body["amount"], body.get("account_id"), f"Expense: {body.get('description','')}", "expense", body["id"])
     await audit(user, "create", "expense", body["id"], None, body)
@@ -751,6 +781,9 @@ async def import_marketplace_orders(body: BulkImportIn, user: dict = Depends(req
     created = 0
     skipped = []
     for o in body.orders:
+        if o.order_number and await db.sales_orders.find_one({"order_number": o.order_number}):
+            skipped.append({"sku": o.variant_sku, "order_number": o.order_number, "reason": "Order already imported"})
+            continue
         # find product by variant sku
         p = await db.products.find_one({"variants.sku": o.variant_sku})
         if not p:
@@ -839,7 +872,7 @@ def to_csv(rows: List[Dict], columns: List[str]) -> str:
 from fastapi.responses import Response as FastResponse
 
 @api.get("/reports/export/sales")
-async def export_sales_csv(user: dict = Depends(require_module("reports"))):
+async def export_sales_csv(user: dict = Depends(require_module("sales"))):
     rows = await db.sales_orders.find({}, {"_id": 0}).sort("date", -1).to_list(10000)
     flat = []
     for r in rows:
@@ -1098,7 +1131,8 @@ async def report_pl(start: str = "", end: str = ""):
 # ---------- AUDIT LOG ----------
 @api.get("/audit_logs", dependencies=[Depends(require_role("owner"))])
 async def list_audit(limit: int = 200):
-    return await db.audit_logs.find({}, {"_id": 0}).sort("created_at", -1).to_list(limit)
+    rows = await db.audit_logs.find({}, {"_id": 0}).sort("created_at", -1).to_list(limit)
+    return json_safe(rows)
 
 # ---------- SEED ----------
 async def seed_all():

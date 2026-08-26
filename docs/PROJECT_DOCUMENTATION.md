@@ -228,8 +228,7 @@ python -m pip check
 
 ### P1 - Wajib untuk operasional harian
 
-- Validasi numerik dan status transition harus konsisten di frontend dan backend.
-- Tolak financial transaction dengan tipe tidak dikenal, nominal negatif, atau account yang tidak ada.
+- Validasi numerik dan status transition harus konsisten di frontend dan backend. Validasi nominal finance, duplicate order number, dan material PO sudah diperketat di backend.
 - Cegah marketplace import duplikat berdasarkan `order_number` dan sediakan laporan item gagal.
 - Jangan melewati material PO yang tidak ditemukan secara diam-diam; proses harus gagal dengan alasan yang jelas.
 - Tambahkan pagination, filter tanggal/status, dan pencarian server-side untuk tabel besar.
@@ -245,7 +244,7 @@ python -m pip check
 
 ## Data Integrity Rules
 
-- Semua stok, saldo account, dan inventory movement harus berubah dalam satu unit proses.
+- Semua stok, saldo account, dan inventory movement harus berubah dalam satu unit proses. Saat ini preflight validation mencegah sebagian besar kegagalan parsial; MongoDB transaction masih diperlukan untuk atomicity penuh.
 - Setiap transaksi keuangan operasional harus memiliki `ref_type` dan `ref_id` yang dapat dilacak.
 - Endpoint create tidak boleh dipercaya menghitung total dari frontend; backend harus menghitung ulang.
 - Endpoint import harus idempotent agar retry tidak menggandakan order atau pemasukan.
