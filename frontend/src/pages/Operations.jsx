@@ -89,9 +89,9 @@ function POForm({ suppliers, materials, onClose, onDone }) {
         ))}
       </div>
       <div className="grid grid-cols-3 gap-3 mt-4">
-        <Field label="Discount"><Input type="number" value={form.discount} onChange={e=>setForm({...form,discount:Number(e.target.value)})}/></Field>
-        <Field label="Shipping"><Input type="number" value={form.shipping} onChange={e=>setForm({...form,shipping:Number(e.target.value)})}/></Field>
-        <Field label="Tax"><Input type="number" value={form.tax} onChange={e=>setForm({...form,tax:Number(e.target.value)})}/></Field>
+        <Field label="Discount"><Input type="number" value={form.discount} onChange={e=>setForm({...form,discount:e.target.value})}/></Field>
+        <Field label="Shipping"><Input type="number" value={form.shipping} onChange={e=>setForm({...form,shipping:e.target.value})}/></Field>
+        <Field label="Tax"><Input type="number" value={form.tax} onChange={e=>setForm({...form,tax:e.target.value})}/></Field>
       </div>
       <div className="mt-4 flex items-center justify-between border-t border-border pt-4">
         <div>
@@ -144,8 +144,8 @@ export function Production() {
 
       {completing && <Modal open onClose={()=>setCompleting(null)} title="Selesaikan Produksi">
         <div className="grid grid-cols-2 gap-4">
-          <Field label="Quantity Passed"><Input type="number" value={completing.quantity_passed} onChange={e=>setCompleting({...completing,quantity_passed:Number(e.target.value)})}/></Field>
-          <Field label="Quantity Rejected"><Input type="number" value={completing.quantity_rejected} onChange={e=>setCompleting({...completing,quantity_rejected:Number(e.target.value)})}/></Field>
+          <Field label="Quantity Passed"><Input type="number" value={completing.quantity_passed} onChange={e=>setCompleting({...completing,quantity_passed:e.target.value})}/></Field>
+          <Field label="Quantity Rejected"><Input type="number" value={completing.quantity_rejected} onChange={e=>setCompleting({...completing,quantity_rejected:e.target.value})}/></Field>
         </div>
         <div className="text-xs text-muted-foreground mt-3">Bahan baku akan dikonsumsi dari inventory, dan produk jadi akan ditambahkan.</div>
         <div className="flex justify-end gap-2 mt-6"><Button variant="outline" onClick={()=>setCompleting(null)}>Batal</Button><Button onClick={complete} data-testid="btn-confirm-complete">Konfirmasi</Button></div>
@@ -186,7 +186,7 @@ function ProdForm({ products, materials, boms, onClose, onDone }) {
             {(selectedProd?.variants||[]).map(v=><option key={v.sku} value={v.sku}>{v.sku} · {v.color}/{v.size}</option>)}
           </Select>
         </Field>
-        <Field label="Quantity"><Input type="number" value={form.quantity} onChange={e=>setForm({...form,quantity:Number(e.target.value)})}/></Field>
+        <Field label="Quantity"><Input type="number" value={form.quantity} onChange={e=>setForm({...form,quantity:e.target.value})}/></Field>
         <Field label="BOM Template">
           <Select onChange={e=>applyBom(e.target.value)}>
             <option value="">-- Manual --</option>
@@ -203,7 +203,7 @@ function ProdForm({ products, materials, boms, onClose, onDone }) {
               <option value="">-- Pilih Material --</option>
               {materials.map(m=><option key={m.id} value={m.id}>{m.name}</option>)}
             </Select>
-            <Input type="number" step="0.1" value={it.quantity} onChange={e=>setForm(f=>({...f, bom_items:f.bom_items.map((x,idx)=>idx===i?{...x,quantity:Number(e.target.value)}:x)}))}/>
+            <Input type="number" step="0.1" value={it.quantity} onChange={e=>setForm(f=>({...f, bom_items:f.bom_items.map((x,idx)=>idx===i?{...x,quantity:e.target.value}:x)}))}/>
             <button onClick={()=>setForm(f=>({...f, bom_items:f.bom_items.filter((_,x)=>x!==i)}))}><Trash2 size={14} className="text-rose-500"/></button>
           </div>
         ))}

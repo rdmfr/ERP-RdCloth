@@ -83,9 +83,9 @@ export default function Settings() {
           {mpModal && <Modal open onClose={()=>setMpModal(null)} title="Marketplace">
             <div className="grid grid-cols-2 gap-3">
               <Field label="Name"><Input value={mpModal.name} onChange={e=>setMpModal({...mpModal,name:e.target.value})}/></Field>
-              <Field label="Admin Fee %"><Input type="number" step="0.01" value={mpModal.admin_fee_pct} onChange={e=>setMpModal({...mpModal,admin_fee_pct:Number(e.target.value)})}/></Field>
-              <Field label="Service Fee %"><Input type="number" step="0.01" value={mpModal.service_fee_pct} onChange={e=>setMpModal({...mpModal,service_fee_pct:Number(e.target.value)})}/></Field>
-              <Field label="Payment Fee %"><Input type="number" step="0.01" value={mpModal.payment_fee_pct} onChange={e=>setMpModal({...mpModal,payment_fee_pct:Number(e.target.value)})}/></Field>
+              <Field label="Admin Fee %"><Input type="number" step="0.01" value={mpModal.admin_fee_pct} onChange={e=>setMpModal({...mpModal,admin_fee_pct:e.target.value})}/></Field>
+              <Field label="Service Fee %"><Input type="number" step="0.01" value={mpModal.service_fee_pct} onChange={e=>setMpModal({...mpModal,service_fee_pct:e.target.value})}/></Field>
+              <Field label="Payment Fee %"><Input type="number" step="0.01" value={mpModal.payment_fee_pct} onChange={e=>setMpModal({...mpModal,payment_fee_pct:e.target.value})}/></Field>
             </div>
             <div className="flex justify-end gap-2 mt-6"><Button variant="outline" onClick={()=>setMpModal(null)}>Batal</Button><Button onClick={async()=>{ if (await saveMp(mpModal, mpModal.id)) setMpModal(null); }}>Simpan</Button></div>
           </Modal>}

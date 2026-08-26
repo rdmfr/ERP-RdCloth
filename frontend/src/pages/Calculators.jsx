@@ -44,7 +44,7 @@ export function HPPCalculator() {
             {items.map((it,i)=>(
               <div key={i} className="grid grid-cols-[1fr_140px_auto] gap-2">
                 <Input value={it.label} onChange={e=>setItems(items.map((x,idx)=>idx===i?{...x,label:e.target.value}:x))} />
-                <Input type="number" value={it.amount} onChange={e=>setItems(items.map((x,idx)=>idx===i?{...x,amount:Number(e.target.value)}:x))} data-testid={`hpp-item-${i}`}/>
+                <Input type="number" value={it.amount} onChange={e=>setItems(items.map((x,idx)=>idx===i?{...x,amount:e.target.value}:x))} data-testid={`hpp-item-${i}`}/>
                 <button onClick={()=>setItems(items.filter((_,x)=>x!==i))} className="text-rose-500">×</button>
               </div>
             ))}

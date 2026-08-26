@@ -63,9 +63,9 @@ function ProductForm({ data, cats, onClose, onSave }) {
         <Field label="Brand"><Input value={form.brand} onChange={e=>set("brand",e.target.value)} /></Field>
         <Field label="Material"><Input value={form.material} onChange={e=>set("material",e.target.value)} /></Field>
         <Field label="Image URL"><Input value={form.image_url} onChange={e=>set("image_url",e.target.value)} /></Field>
-        <Field label="Cost (default)"><Input type="number" value={form.cost} onChange={e=>set("cost",Number(e.target.value))} /></Field>
-        <Field label="Selling Price"><Input type="number" value={form.selling_price} onChange={e=>set("selling_price",Number(e.target.value))} /></Field>
-        <Field label="Minimum Stock"><Input type="number" value={form.minimum_stock} onChange={e=>set("minimum_stock",Number(e.target.value))} /></Field>
+        <Field label="Cost (default)"><Input type="number" value={form.cost} onChange={e=>set("cost",e.target.value)} /></Field>
+        <Field label="Selling Price"><Input type="number" value={form.selling_price} onChange={e=>set("selling_price",e.target.value)} /></Field>
+        <Field label="Minimum Stock"><Input type="number" value={form.minimum_stock} onChange={e=>set("minimum_stock",e.target.value)} /></Field>
         <Field label="Status">
           <Select value={form.status} onChange={e=>set("status",e.target.value)}>
             <option value="active">Active</option><option value="inactive">Inactive</option>
@@ -84,10 +84,10 @@ function ProductForm({ data, cats, onClose, onSave }) {
               <Field label="Color"><Input value={v.color} onChange={e=>setVariant(i,"color",e.target.value)} /></Field>
               <Field label="Size"><Input value={v.size} onChange={e=>setVariant(i,"size",e.target.value)} /></Field>
               <Field label="SKU"><Input value={v.sku} onChange={e=>setVariant(i,"sku",e.target.value)} placeholder="auto" /></Field>
-              <Field label="Stock"><Input type="number" value={v.stock} onChange={e=>setVariant(i,"stock",Number(e.target.value))} /></Field>
-              <Field label="Cost"><Input type="number" value={v.cost} onChange={e=>setVariant(i,"cost",Number(e.target.value))} /></Field>
+              <Field label="Stock"><Input type="number" value={v.stock} onChange={e=>setVariant(i,"stock",e.target.value)} /></Field>
+              <Field label="Cost"><Input type="number" value={v.cost} onChange={e=>setVariant(i,"cost",e.target.value)} /></Field>
               <div className="flex gap-1">
-                <Field label="Price"><Input type="number" value={v.selling_price} onChange={e=>setVariant(i,"selling_price",Number(e.target.value))} /></Field>
+                <Field label="Price"><Input type="number" value={v.selling_price} onChange={e=>setVariant(i,"selling_price",e.target.value)} /></Field>
                 <button onClick={()=>rmVar(i)} className="text-rose-500 pb-2"><Trash2 size={14}/></button>
               </div>
             </div>

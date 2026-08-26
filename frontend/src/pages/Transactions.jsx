@@ -138,10 +138,10 @@ function SalesForm({ products, customers, marketplaces, onClose, onDone }) {
       </div>
 
       <div className="grid grid-cols-3 gap-3 mt-4">
-        <Field label="Discount"><Input type="number" value={form.discount} onChange={e=>setForm({...form,discount:Number(e.target.value)})}/></Field>
-        <Field label="Voucher"><Input type="number" value={form.voucher} onChange={e=>setForm({...form,voucher:Number(e.target.value)})}/></Field>
-        <Field label="Shipping"><Input type="number" value={form.shipping} onChange={e=>setForm({...form,shipping:Number(e.target.value)})}/></Field>
-        <Field label="Advertising"><Input type="number" value={form.advertising_cost} onChange={e=>setForm({...form,advertising_cost:Number(e.target.value)})}/></Field>
+        <Field label="Discount"><Input type="number" value={form.discount} onChange={e=>setForm({...form,discount:e.target.value})}/></Field>
+        <Field label="Voucher"><Input type="number" value={form.voucher} onChange={e=>setForm({...form,voucher:e.target.value})}/></Field>
+        <Field label="Shipping"><Input type="number" value={form.shipping} onChange={e=>setForm({...form,shipping:e.target.value})}/></Field>
+        <Field label="Advertising"><Input type="number" value={form.advertising_cost} onChange={e=>setForm({...form,advertising_cost:e.target.value})}/></Field>
         <Field label="Payment">
           <Select value={form.payment_status} onChange={e=>setForm({...form,payment_status:e.target.value})}>
             <option value="paid">Paid</option><option value="unpaid">Unpaid</option>
@@ -249,7 +249,7 @@ export function Finance() {
           <Field label="Account"><Select value={txnModal.account_id} onChange={e=>setTxnModal({...txnModal,account_id:e.target.value})}>
             {accounts.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}
           </Select></Field>
-          <Field label="Amount"><Input type="number" value={txnModal.amount} onChange={e=>setTxnModal({...txnModal,amount:Number(e.target.value)})}/></Field>
+          <Field label="Amount"><Input type="number" value={txnModal.amount} onChange={e=>setTxnModal({...txnModal,amount:e.target.value})}/></Field>
           <Field label="Description"><Input value={txnModal.description} onChange={e=>setTxnModal({...txnModal,description:e.target.value})}/></Field>
         </div>
         <div className="flex justify-end gap-2 mt-6"><Button variant="outline" onClick={()=>setTxnModal(null)}>Batal</Button><Button onClick={saveTxn} data-testid="btn-confirm-txn">Simpan</Button></div>
@@ -260,7 +260,7 @@ export function Finance() {
           <Field label="Category"><Select value={expModal.category} onChange={e=>setExpModal({...expModal,category:e.target.value})}>
             {expCats.map(c=><option key={c.id} value={c.name}>{c.name}</option>)}
           </Select></Field>
-          <Field label="Amount"><Input type="number" value={expModal.amount} onChange={e=>setExpModal({...expModal,amount:Number(e.target.value)})}/></Field>
+          <Field label="Amount"><Input type="number" value={expModal.amount} onChange={e=>setExpModal({...expModal,amount:e.target.value})}/></Field>
           <Field label="Account"><Select value={expModal.account_id} onChange={e=>setExpModal({...expModal,account_id:e.target.value})}>
             {accounts.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}
           </Select></Field>

@@ -40,7 +40,20 @@ export function Field({ label, children }) {
 }
 
 export function Input(props) {
-  return <input {...props} className={`w-full px-3 py-2 bg-background border border-border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-neutral-900 dark:focus:ring-stone-100 ${props.className||""}`} />;
+  const isNumeric = props.type === "number";
+  const normalizeNumeric = (value) => {
+    if (value === "" || value === "-" || value === "." || value === "-.") return value;
+    const sign = value.startsWith("-") ? "-" : "";
+    const unsigned = sign ? value.slice(1) : value;
+    const [whole, decimal] = unsigned.split(".");
+    const normalizedWhole = whole.replace(/^0+(?=\d)/, "") || "0";
+    return sign + normalizedWhole + (decimal === undefined ? "" : `.${decimal}`);
+  };
+  const { onChange, type, value, ...rest } = props;
+  return <input {...rest} type={isNumeric ? "text" : type} inputMode={isNumeric ? "decimal" : props.inputMode}
+    value={isNumeric && value === 0 ? "" : value}
+    onChange={isNumeric ? (event) => onChange?.({ ...event, target: { ...event.target, value: normalizeNumeric(event.target.value) } }) : onChange}
+    className={`w-full px-3 py-2 bg-background border border-border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-neutral-900 dark:focus:ring-stone-100 ${props.className||""}`} />;
 }
 
 export function Select({ children, ...p }) {

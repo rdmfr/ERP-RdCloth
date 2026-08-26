@@ -38,9 +38,9 @@ export function Materials() {
         <div className="grid grid-cols-2 gap-4">
           <Field label="Nama"><Input value={editing.name} onChange={e=>setEditing({...editing,name:e.target.value})}/></Field>
           <Field label="Unit"><Input value={editing.unit} onChange={e=>setEditing({...editing,unit:e.target.value})}/></Field>
-          <Field label="Stock"><Input type="number" value={editing.stock} onChange={e=>setEditing({...editing,stock:Number(e.target.value)})}/></Field>
-          <Field label="Cost/Unit"><Input type="number" value={editing.cost} onChange={e=>setEditing({...editing,cost:Number(e.target.value)})}/></Field>
-          <Field label="Minimum Stock"><Input type="number" value={editing.minimum_stock} onChange={e=>setEditing({...editing,minimum_stock:Number(e.target.value)})}/></Field>
+          <Field label="Stock"><Input type="number" value={editing.stock} onChange={e=>setEditing({...editing,stock:e.target.value})}/></Field>
+          <Field label="Cost/Unit"><Input type="number" value={editing.cost} onChange={e=>setEditing({...editing,cost:e.target.value})}/></Field>
+          <Field label="Minimum Stock"><Input type="number" value={editing.minimum_stock} onChange={e=>setEditing({...editing,minimum_stock:e.target.value})}/></Field>
           <Field label="Supplier">
             <Select value={editing.supplier_id||""} onChange={e=>setEditing({...editing,supplier_id:e.target.value})}>
               <option value="">-- Pilih --</option>
@@ -164,7 +164,7 @@ export function MasterDataPage({ endpoint, title, subtitle, fields }) {
                   {f.options.map(o=><option key={o.value} value={o.value}>{o.label}</option>)}
                 </Select>
               ) : (
-                <Input type={f.type||"text"} value={editing[f.key]??""} onChange={e=>setEditing({...editing,[f.key]:f.type==="number"?Number(e.target.value):e.target.value})}/>
+                <Input type={f.type||"text"} value={editing[f.key]??""} onChange={e=>setEditing({...editing,[f.key]:e.target.value})}/>
               )}
             </Field>
           ))}
