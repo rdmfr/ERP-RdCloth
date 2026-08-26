@@ -6,7 +6,7 @@ import { api } from "@/lib/api";
 import {
   LayoutDashboard, ShoppingCart, Package, Boxes, Truck, Users, Factory,
   Wallet, FileBarChart, Calculator, HardHat, Settings, Sun, Moon,
-  LogOut, Menu, X, Search, Bell, ClipboardList, TrendingUp, Layers, Upload,
+  LogOut, Menu, X, Search, Bell, ClipboardList, TrendingUp, Layers, Upload, ChevronDown,
 } from "lucide-react";
 
 const NAV = [
@@ -36,6 +36,7 @@ export default function Layout({ children }) {
   const [searchResults, setSearchResults] = useState([]);
   const [notifications, setNotifications] = useState([]);
   const [showNotifications, setShowNotifications] = useState(false);
+  const [showProfile, setShowProfile] = useState(false);
   const nav = useNavigate();
 
   const items = NAV.filter((n) => canAccess(n.module));
@@ -108,12 +109,15 @@ export default function Layout({ children }) {
           <button onClick={toggle} data-testid="theme-toggle" className="p-2 rounded-md hover:bg-stone-100 dark:hover:bg-stone-900">
             {theme === "dark" ? <Sun size={16}/> : <Moon size={16}/>}
           </button>
-          <button onClick={() => setShowNotifications((value) => !value)} className="p-2 rounded-md hover:bg-stone-100 dark:hover:bg-stone-900 relative" data-testid="notifications">
-            <Bell size={16}/>
-            {notifications.length > 0 && <span className="absolute -top-0.5 -right-0.5 min-w-4 h-4 px-1 rounded-full bg-rose-600 text-white text-[9px] leading-4">{notifications.length}</span>}
-          </button>
-          {showNotifications && <div className="absolute right-4 lg:right-8 top-14 z-30 w-80 rounded-md border border-border bg-card shadow-lg p-3"><div className="font-semibold text-sm mb-2">Notifications</div>{notifications.length === 0 ? <div className="text-sm text-muted-foreground">Tidak ada notifikasi.</div> : notifications.map((item, index) => <div key={index} className="py-2 border-t border-border text-sm"><span className="font-semibold">{item.severity}</span> · {item.message}</div>)}</div>}
-          <div className="flex items-center gap-2" data-testid="user-profile">
+          <div className="relative flex items-center gap-2 ml-auto">
+            <button onClick={() => { setShowNotifications((value) => !value); setShowProfile(false); }} className="p-2 rounded-md hover:bg-stone-100 dark:hover:bg-stone-900 relative" data-testid="notifications" aria-label="Notifications">
+              <Bell size={16}/>
+              {notifications.length > 0 && <span className="absolute -top-0.5 -right-0.5 min-w-4 h-4 px-1 rounded-full bg-rose-600 text-white text-[9px] leading-4">{notifications.length}</span>}
+            </button>
+            {showNotifications && <div className="absolute right-14 top-11 z-30 w-80 rounded-md border border-border bg-card shadow-lg p-3"><div className="font-semibold text-sm mb-2">Notifications</div>{notifications.length === 0 ? <div className="text-sm text-muted-foreground">Tidak ada notifikasi.</div> : notifications.map((item, index) => <div key={index} className="py-2 border-t border-border text-sm"><span className="font-semibold">{item.severity}</span> · {item.message}</div>)}</div>}
+          </div>
+          <div className="relative" data-testid="user-profile">
+            <button onClick={() => { setShowProfile((value) => !value); setShowNotifications(false); }} className="flex items-center gap-2 rounded-md px-2 py-1.5 hover:bg-stone-100 dark:hover:bg-stone-900" aria-label="Open profile menu">
             <div className="w-8 h-8 rounded-full bg-neutral-900 dark:bg-stone-100 text-white dark:text-stone-900 flex items-center justify-center text-xs font-bold font-display">
               {user?.name?.[0] || "U"}
             </div>
@@ -121,6 +125,9 @@ export default function Layout({ children }) {
               <div className="text-sm font-semibold">{user?.name}</div>
               <div className="text-[10px] uppercase tracking-widest text-muted-foreground">{user?.role}</div>
             </div>
+            <ChevronDown size={14} className="text-muted-foreground" />
+            </button>
+            {showProfile && <div className="absolute right-0 top-12 z-30 w-56 rounded-md border border-border bg-card shadow-lg p-2"><div className="px-3 py-2 border-b border-border"><div className="text-sm font-semibold">{user?.name}</div><div className="text-xs text-muted-foreground">{user?.email}</div></div><button onClick={logout} data-testid="profile-logout" className="w-full flex items-center gap-2 px-3 py-2 mt-1 text-sm rounded-md text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/20"><LogOut size={15}/> Keluar</button></div>}
           </div>
         </header>
 
