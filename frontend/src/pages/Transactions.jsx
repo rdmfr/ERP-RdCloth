@@ -174,6 +174,8 @@ export function Finance() {
   const { rows: accounts, reload: reloadAcc } = useCRUD("accounts");
   const [txnModal, setTxnModal] = useState(null);
   const [expModal, setExpModal] = useState(null);
+  const [reconcileModal, setReconcileModal] = useState(null);
+  const [attachment, setAttachment] = useState(null);
   const { rows: expCats } = useCRUD("expense_categories");
 
   const reload = useCallback(async () => {
@@ -191,11 +193,23 @@ export function Finance() {
     try { await api.post("/expenses", expModal); toast.success("Expense tersimpan"); setExpModal(null); reload(); }
     catch (e) { toast.error(formatErr(e.response?.data?.detail)); }
   };
+  const reconcile = async () => {
+    try { await api.post("/finance/reconcile", reconcileModal); toast.success("Rekonsiliasi tersimpan"); setReconcileModal(null); reload(); }
+    catch (e) { toast.error(formatErr(e.response?.data?.detail)); }
+  };
+  const uploadAttachment = async () => {
+    if (!attachment?.file) return;
+    const data = new FormData(); data.append("file", attachment.file); data.append("entity_type", "finance"); data.append("entity_id", "general");
+    try { await api.post("/attachments", data, { headers: { "Content-Type": "multipart/form-data" } }); toast.success("Lampiran tersimpan di D:/RdCloth"); setAttachment(null); }
+    catch (e) { toast.error(formatErr(e.response?.data?.detail)); }
+  };
 
   return (
     <div>
       <PageHeader title="Finance" subtitle="Cash, expenses, capital" action={
         <div className="flex gap-2">
+          <Button variant="outline" onClick={()=>setAttachment({file:null})}>Lampiran</Button>
+          <Button variant="outline" onClick={()=>setReconcileModal({account_id:accounts[0]?.id,actual_balance:"",notes:""})}>Rekonsiliasi</Button>
           <Button variant="outline" onClick={()=>setExpModal({description:"",amount:0,category:"Other",account_id:accounts[0]?.id})} data-testid="btn-new-expense"><Plus size={14} className="inline mr-1"/> Expense</Button>
           <Button onClick={()=>setTxnModal({type:"owner_investment",amount:0,description:"",account_id:accounts[0]?.id})} data-testid="btn-new-txn"><Plus size={14} className="inline mr-1"/> Transaksi</Button>
         </div>
@@ -268,6 +282,8 @@ export function Finance() {
         </div>
         <div className="flex justify-end gap-2 mt-6"><Button variant="outline" onClick={()=>setExpModal(null)}>Batal</Button><Button onClick={saveExp} data-testid="btn-confirm-expense">Simpan</Button></div>
       </Modal>}
+      {reconcileModal && <Modal open onClose={()=>setReconcileModal(null)} title="Rekonsiliasi Saldo"><div className="space-y-3"><Field label="Account"><Select value={reconcileModal.account_id} onChange={e=>setReconcileModal({...reconcileModal,account_id:e.target.value})}>{accounts.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}</Select></Field><Field label="Saldo Aktual"><Input type="number" value={reconcileModal.actual_balance} onChange={e=>setReconcileModal({...reconcileModal,actual_balance:e.target.value})}/></Field><Field label="Catatan"><Input value={reconcileModal.notes} onChange={e=>setReconcileModal({...reconcileModal,notes:e.target.value})}/></Field></div><div className="flex justify-end gap-2 mt-6"><Button variant="outline" onClick={()=>setReconcileModal(null)}>Batal</Button><Button onClick={reconcile}>Simpan</Button></div></Modal>}
+      {attachment && <Modal open onClose={()=>setAttachment(null)} title="Upload Lampiran"><div className="space-y-3"><Field label="File"><Input type="file" onChange={e=>setAttachment({...attachment,file:e.target.files?.[0]})}/></Field><div className="text-xs text-muted-foreground">File disimpan di D:/RdCloth pada komputer backend.</div></div><div className="flex justify-end gap-2 mt-6"><Button variant="outline" onClick={()=>setAttachment(null)}>Batal</Button><Button onClick={uploadAttachment}>Upload</Button></div></Modal>}
     </div>
   );
 }

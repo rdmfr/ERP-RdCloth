@@ -81,6 +81,8 @@ export function Inventory() {
   const { rows: materials, reload: reloadMats } = useCRUD("materials");
   const [adjust, setAdjust] = useState(null);
   const [opname, setOpname] = useState(null);
+  const [selected, setSelected] = useState([]);
+  const [bulk, setBulk] = useState(null);
 
   useEffect(() => { api.get("/inventory/movements").then(r=>setMovements(r.data)); }, []);
 
@@ -107,6 +109,12 @@ export function Inventory() {
       api.get("/inventory/movements").then(r=>setMovements(r.data));
     } catch (e) { toast.error(formatErr(e.response?.data?.detail)); }
   };
+  const doBulk = async () => {
+    try {
+      await api.post("/inventory/bulk-adjust", { adjustments: selected.map((item) => ({ product_id: item.product.id, variant_sku: item.sku, quantity: Number(bulk.quantity), type: bulk.type, notes: bulk.notes })) });
+      toast.success(`${selected.length} stok diperbarui`); setSelected([]); setBulk(null); api.get("/inventory/movements").then(r=>setMovements(r.data));
+    } catch (e) { toast.error(formatErr(e.response?.data?.detail)); }
+  };
 
   return (
     <div>
@@ -118,8 +126,11 @@ export function Inventory() {
         ))}
       </div>
       {tab==="products" && (
+        <div>
+        <div className="flex justify-end mb-3"><Button disabled={selected.length===0} onClick={()=>setBulk({quantity:"",type:"adjustment",notes:""})}>Bulk Edit ({selected.length})</Button></div>
         <DataTable testid="inv-products-table" rows={products.flatMap(p=>(p.variants||[]).map(v=>({...v,product:p})))}
           columns={[
+            {header:"", cell:r=><input type="checkbox" checked={selected.some(item=>item.product.id===r.product.id&&item.sku===r.sku)} onChange={(e)=>setSelected(e.target.checked?[...selected,r]:selected.filter(item=>item.product.id!==r.product.id||item.sku!==r.sku))}/>},
             {header:"Product", cell:r=><span className="font-semibold">{r.product.name}</span>},
             {header:"Variant SKU", cell:r=><span className="font-mono text-xs">{r.sku}</span>},
             {header:"Color/Size", cell:r=>`${r.color||"-"} / ${r.size||"-"}`},
@@ -129,6 +140,7 @@ export function Inventory() {
             {header:"Status", cell:r=><StatusPill status={Number(r.stock)===0?"out_of_stock":(Number(r.stock)<=Number(r.product.minimum_stock||0)?"low_stock":"ok")}/>},
             {header:"", cell:r=><div className="flex gap-2"><Button variant="outline" onClick={()=>setAdjust({kind:"product",pid:r.product.id,sku:r.sku,qty:0,type:"adjustment",notes:""})} data-testid={`adjust-${r.sku}`}>Adjust</Button><Button variant="outline" onClick={()=>setOpname({kind:"product",itemId:r.product.id,sku:r.sku,stock:r.stock,notes:""})}>Opname</Button></div>},
           ]}/>
+        </div>
       )}
       {tab==="materials" && <Materials/>}
       {tab==="movements" && (
@@ -162,6 +174,7 @@ export function Inventory() {
         </div>
         <div className="flex justify-end gap-2 mt-6"><Button variant="outline" onClick={()=>setOpname(null)}>Batal</Button><Button onClick={doOpname} data-testid="btn-confirm-opname">Simpan Opname</Button></div>
       </Modal>}
+      {bulk && <Modal open onClose={()=>setBulk(null)} title="Bulk Edit Stok"><div className="space-y-3"><div className="text-sm text-muted-foreground">{selected.length} varian dipilih. Nilai ini akan ditambahkan ke stok saat ini.</div><Field label="Perubahan Quantity"><Input type="number" value={bulk.quantity} onChange={e=>setBulk({...bulk,quantity:e.target.value})}/></Field><Field label="Type"><Select value={bulk.type} onChange={e=>setBulk({...bulk,type:e.target.value})}><option value="adjustment">Adjustment</option><option value="damage">Damage</option><option value="return">Return</option></Select></Field><Field label="Catatan"><Input value={bulk.notes} onChange={e=>setBulk({...bulk,notes:e.target.value})}/></Field></div><div className="flex justify-end gap-2 mt-6"><Button variant="outline" onClick={()=>setBulk(null)}>Batal</Button><Button onClick={doBulk}>Simpan Bulk Edit</Button></div></Modal>}
     </div>
   );
 }

@@ -8,14 +8,17 @@ import uuid
 import logging
 import math
 import contextvars
+import re
+import shutil
 from contextlib import asynccontextmanager
 from functools import wraps
 import bcrypt
 import jwt
 from datetime import datetime, timezone, timedelta
 from typing import List, Optional, Any, Dict
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, Request, Response, status
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, Request, Response, status, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field, EmailStr, ConfigDict
 from motor.motor_asyncio import AsyncIOMotorClient
 from bson import ObjectId
@@ -84,6 +87,8 @@ class _SessionDatabase:
         return getattr(self._database, name)
 
 db = _SessionDatabase(client[DB_NAME])
+ATTACHMENTS_DIR = Path(os.environ.get("ATTACHMENTS_DIR", "D:/RdCloth"))
+ATTACHMENTS_DIR.mkdir(parents=True, exist_ok=True)
 
 @asynccontextmanager
 async def mongo_transaction():
@@ -248,6 +253,42 @@ async def audit(user: dict, action: str, entity: str, entity_id: str = "", old: 
         "action": action, "entity": entity, "entity_id": entity_id,
         "old_value": json_safe(old), "new_value": json_safe(new), "created_at": now_iso(),
     })
+
+@api.post("/attachments")
+async def upload_attachment(
+    file: UploadFile = File(...), entity_type: str = Form(...), entity_id: str = Form(...),
+    user: dict = Depends(get_current_user),
+):
+    if not re.fullmatch(r"[a-zA-Z0-9_-]+", entity_type) or not entity_id:
+        raise HTTPException(400, "Invalid attachment reference")
+    original_name = Path(file.filename or "attachment").name
+    suffix = Path(original_name).suffix.lower()
+    if suffix not in {".pdf", ".png", ".jpg", ".jpeg", ".webp", ".csv", ".xlsx", ".doc", ".docx"}:
+        raise HTTPException(400, "Unsupported attachment type")
+    attachment_id = new_id()
+    stored_name = f"{attachment_id}{suffix}"
+    target = ATTACHMENTS_DIR / stored_name
+    with target.open("wb") as output:
+        shutil.copyfileobj(file.file, output)
+    doc = {"id": attachment_id, "entity_type": entity_type, "entity_id": entity_id, "original_name": original_name, "stored_name": stored_name, "content_type": file.content_type or "application/octet-stream", "size": target.stat().st_size, "uploaded_by": user["id"], "created_at": now_iso()}
+    await db.attachments.insert_one(doc)
+    await audit(user, "upload", "attachment", attachment_id, None, {k: v for k, v in doc.items() if k != "stored_name"})
+    doc.pop("_id", None)
+    return doc
+
+@api.get("/attachments")
+async def list_attachments(entity_type: str, entity_id: str, user: dict = Depends(get_current_user)):
+    return await db.attachments.find({"entity_type": entity_type, "entity_id": entity_id}, {"_id": 0, "stored_name": 0}).sort("created_at", -1).to_list(100)
+
+@api.get("/attachments/{attachment_id}/download")
+async def download_attachment(attachment_id: str, user: dict = Depends(get_current_user)):
+    attachment = await db.attachments.find_one({"id": attachment_id}, {"_id": 0})
+    if not attachment:
+        raise HTTPException(404, "Attachment not found")
+    target = ATTACHMENTS_DIR / attachment["stored_name"]
+    if not target.is_file():
+        raise HTTPException(404, "Attachment file not found")
+    return FileResponse(target, media_type=attachment.get("content_type"), filename=attachment.get("original_name", target.name))
 
 # ---------- AUTH ----------
 class LoginIn(BaseModel):
@@ -459,6 +500,23 @@ class VariantAdjustIn(BaseModel):
     quantity: float
     type: str = "adjustment"
     notes: str = ""
+
+class BulkAdjustmentIn(BaseModel):
+    adjustments: List[VariantAdjustIn | MaterialAdjustIn]
+
+@api.post("/inventory/bulk-adjust")
+@transactional
+async def bulk_adjust_inventory(body: BulkAdjustmentIn, user: dict = Depends(require_module("inventory"))):
+    if not body.adjustments:
+        raise HTTPException(400, "At least one adjustment is required")
+    results = []
+    for adjustment in body.adjustments:
+        if isinstance(adjustment, MaterialAdjustIn):
+            result = await adjust_material(adjustment, user)
+        else:
+            result = await adjust_variant(adjustment, user)
+        results.append(result)
+    return {"ok": True, "count": len(results), "results": results}
 
 class StockOpnameIn(BaseModel):
     kind: str
@@ -1213,6 +1271,66 @@ async def dashboard_charts():
         "revenue_chart": revenue_chart, "top_products": top_products,
         "channel_chart": channel_chart, "expense_chart": expense_chart,
     }
+
+@api.get("/search")
+async def global_search(q: str, user: dict = Depends(get_current_user)):
+    query = q.strip()
+    if len(query) < 2:
+        return []
+    pattern = {"$regex": re.escape(query), "$options": "i"}
+    results = []
+    for collection, entity_type, fields in [
+        ("products", "product", ["name", "sku"]), ("customers", "customer", ["name", "email", "phone"]),
+        ("suppliers", "supplier", ["name", "email", "phone"]), ("sales_orders", "sales_order", ["order_number", "customer_name"]),
+        ("purchase_orders", "purchase_order", ["po_number"]), ("production_orders", "production_order", ["prod_number", "product_name"]),
+    ]:
+        criteria = [{field: pattern} for field in fields]
+        rows = await db[collection].find({"$or": criteria, "status": {"$ne": "archived"}}, {"_id": 0}).to_list(20)
+        for row in rows:
+            results.append({"type": entity_type, "id": row.get("id"), "label": row.get("name") or row.get("order_number") or row.get("po_number") or row.get("prod_number"), "detail": row.get("sku") or row.get("customer_name") or row.get("product_name") or ""})
+    return results[:50]
+
+@api.get("/notifications")
+async def notifications(user: dict = Depends(get_current_user)):
+    products = await db.products.find({"status": {"$ne": "archived"}}, {"_id": 0}).to_list(1000)
+    materials = await db.materials.find({"status": {"$ne": "archived"}}, {"_id": 0}).to_list(1000)
+    notifications = []
+    for product in products:
+        for variant in product.get("variants", []):
+            stock = float(variant.get("stock", 0))
+            minimum = float(product.get("minimum_stock", 0))
+            if stock <= minimum:
+                notifications.append({"type": "low_stock", "severity": "critical" if stock == 0 else "warning", "message": f"{product.get('name', '')} {variant.get('sku', '')} stok {stock}"})
+    for material in materials:
+        stock = float(material.get("stock", 0))
+        if stock <= float(material.get("minimum_stock", 0)):
+            notifications.append({"type": "low_stock", "severity": "critical" if stock == 0 else "warning", "message": f"Bahan {material.get('name', '')} stok {stock}"})
+    pending = await db.purchase_orders.count_documents({"received_status": "pending"})
+    if pending:
+        notifications.append({"type": "pending_purchase", "severity": "info", "message": f"{pending} purchase order menunggu penerimaan"})
+    return {"count": len(notifications), "items": notifications[:50]}
+
+class ReconciliationIn(BaseModel):
+    account_id: str
+    actual_balance: float
+    notes: str = ""
+
+@api.post("/finance/reconcile")
+@transactional
+async def reconcile_account(body: ReconciliationIn, user: dict = Depends(require_module("finance"))):
+    actual = nonnegative(body.actual_balance, "Actual balance")
+    account = await db.accounts.find_one({"id": body.account_id})
+    if not account:
+        raise HTTPException(404, "Financial account not found")
+    system_balance = float(account.get("balance", 0))
+    result = {"account_id": body.account_id, "system_balance": system_balance, "actual_balance": actual, "difference": actual - system_balance, "notes": body.notes}
+    await db.reconciliations.insert_one({"id": new_id(), **result, "user_id": user["id"], "created_at": now_iso()})
+    await audit(user, "reconcile", "account", body.account_id, {"balance": system_balance}, result)
+    return result
+
+@api.get("/finance/reconciliations")
+async def list_reconciliations(user: dict = Depends(require_module("finance"))):
+    return await db.reconciliations.find({}, {"_id": 0}).sort("created_at", -1).to_list(200)
 
 # ---------- REPORTS ----------
 @api.get("/reports/profit_loss", dependencies=[Depends(require_module("reports"))])

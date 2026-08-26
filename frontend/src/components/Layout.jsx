@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTheme } from "@/contexts/ThemeContext";
+import { api } from "@/lib/api";
 import {
   LayoutDashboard, ShoppingCart, Package, Boxes, Truck, Users, Factory,
   Wallet, FileBarChart, Calculator, HardHat, Settings, Sun, Moon,
@@ -31,9 +32,20 @@ export default function Layout({ children }) {
   const { user, logout, canAccess } = useAuth();
   const { theme, toggle } = useTheme();
   const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const [searchResults, setSearchResults] = useState([]);
+  const [notifications, setNotifications] = useState([]);
+  const [showNotifications, setShowNotifications] = useState(false);
   const nav = useNavigate();
 
   const items = NAV.filter((n) => canAccess(n.module));
+
+  useEffect(() => {
+    if (search.trim().length < 2) { setSearchResults([]); return; }
+    const timer = setTimeout(() => api.get(`/search?q=${encodeURIComponent(search)}`).then(r => setSearchResults(r.data)).catch(() => setSearchResults([])), 250);
+    return () => clearTimeout(timer);
+  }, [search]);
+  useEffect(() => { api.get("/notifications").then(r => setNotifications(r.data.items || [])).catch(() => {}); }, []);
 
   return (
     <div className="min-h-screen flex bg-background text-foreground">
@@ -84,16 +96,23 @@ export default function Layout({ children }) {
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
             <input
               data-testid="topbar-search"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
               placeholder="Cari produk, order, customer..."
               className="w-full pl-9 pr-3 py-2 bg-stone-100 dark:bg-stone-900 border border-border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-neutral-900 dark:focus:ring-stone-100"
             />
+            {searchResults.length > 0 && <div className="absolute top-full left-0 right-0 mt-1 z-30 rounded-md border border-border bg-card shadow-lg overflow-hidden">
+              {searchResults.map((result) => <button key={`${result.type}-${result.id}`} onClick={() => { setSearch(""); setSearchResults([]); }} className="block w-full text-left px-3 py-2 hover:bg-stone-100 dark:hover:bg-stone-900"><div className="text-sm font-semibold">{result.label}</div><div className="text-xs text-muted-foreground">{result.type} · {result.detail}</div></button>)}
+            </div>}
           </div>
           <button onClick={toggle} data-testid="theme-toggle" className="p-2 rounded-md hover:bg-stone-100 dark:hover:bg-stone-900">
             {theme === "dark" ? <Sun size={16}/> : <Moon size={16}/>}
           </button>
-          <button className="p-2 rounded-md hover:bg-stone-100 dark:hover:bg-stone-900 relative" data-testid="notifications">
+          <button onClick={() => setShowNotifications((value) => !value)} className="p-2 rounded-md hover:bg-stone-100 dark:hover:bg-stone-900 relative" data-testid="notifications">
             <Bell size={16}/>
+            {notifications.length > 0 && <span className="absolute -top-0.5 -right-0.5 min-w-4 h-4 px-1 rounded-full bg-rose-600 text-white text-[9px] leading-4">{notifications.length}</span>}
           </button>
+          {showNotifications && <div className="absolute right-4 lg:right-8 top-14 z-30 w-80 rounded-md border border-border bg-card shadow-lg p-3"><div className="font-semibold text-sm mb-2">Notifications</div>{notifications.length === 0 ? <div className="text-sm text-muted-foreground">Tidak ada notifikasi.</div> : notifications.map((item, index) => <div key={index} className="py-2 border-t border-border text-sm"><span className="font-semibold">{item.severity}</span> · {item.message}</div>)}</div>}
           <div className="flex items-center gap-2" data-testid="user-profile">
             <div className="w-8 h-8 rounded-full bg-neutral-900 dark:bg-stone-100 text-white dark:text-stone-900 flex items-center justify-center text-xs font-bold font-display">
               {user?.name?.[0] || "U"}
