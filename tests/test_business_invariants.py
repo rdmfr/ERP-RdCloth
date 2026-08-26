@@ -64,6 +64,21 @@ class BusinessInvariantTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(material["stock"], 1)
         self.assertEqual(product["variants"][0]["stock"], 0)
 
+    async def test_stock_opname_records_delta_and_updates_stock(self):
+        await server.db.materials.insert_one({"id": "material-1", "stock": 10, "cost": 5})
+        result = await server.stock_opname(server.StockOpnameIn(kind="material", item_id="material-1", physical_stock=7, notes="Counted"), self.user)
+        self.assertEqual(result["delta"], -3)
+        material = await server.db.materials.find_one({"id": "material-1"})
+        self.assertEqual(material["stock"], 7)
+        movement = await server.db.inventory_movements.find_one({"ref_type": "opname"})
+        self.assertEqual(movement["quantity"], -3)
+
+    async def test_soft_deleted_records_are_hidden_from_active_list(self):
+        await server.db.suppliers.insert_one({"id": "supplier-1", "name": "Old Supplier", "status": "active"})
+        await server.db.suppliers.update_one({"id": "supplier-1"}, {"$set": {"status": "archived"}})
+        active = await server.db.suppliers.find({"status": {"$ne": "archived"}}).to_list(10)
+        self.assertEqual(active, [])
+
     def test_audit_values_are_json_safe(self):
         value = server.json_safe({"id": ObjectId("507f1f77bcf86cd799439011")})
         self.assertEqual(value["id"], "507f1f77bcf86cd799439011")

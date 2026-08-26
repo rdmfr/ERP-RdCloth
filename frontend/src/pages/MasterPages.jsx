@@ -7,7 +7,15 @@ export function Materials() {
   const { rows, save, remove, reload } = useCRUD("materials");
   const { rows: suppliers } = useCRUD("suppliers");
   const [editing, setEditing] = useState(null);
+  const [opname, setOpname] = useState(null);
   const openNew = () => setEditing({ name:"", unit:"pcs", stock:0, cost:0, minimum_stock:0 });
+  const doOpname = async () => {
+    try {
+      const { data } = await api.post("/inventory/opname", { kind:"material", item_id:opname.id, physical_stock:Number(opname.stock), notes:opname.notes });
+      toast.success(`Opname tersimpan. Selisih: ${data.delta > 0 ? "+" : ""}${data.delta}`);
+      setOpname(null); reload();
+    } catch (e) { toast.error(formatErr(e.response?.data?.detail)); }
+  };
 
   return (
     <div>
@@ -28,6 +36,7 @@ export function Materials() {
           { header: "", cell: r => (
             <div className="flex gap-2">
               <button onClick={()=>setEditing(r)}><Edit size={14}/></button>
+              <button onClick={()=>setOpname({id:r.id,stock:r.stock,notes:""})}>Opname</button>
               <button onClick={()=>remove(r.id)}><Trash2 size={14} className="text-rose-500"/></button>
             </div>
           )},
@@ -53,6 +62,14 @@ export function Materials() {
           <Button onClick={async()=>{ if (await save(editing, editing.id)) setEditing(null); }}>Simpan</Button>
         </div>
       </Modal>}
+      {opname && <Modal open onClose={()=>setOpname(null)} title="Stock Opname Bahan">
+        <div className="space-y-3">
+          <div className="text-sm text-muted-foreground">Stok sistem: <b>{fmtNum(opname.stock)}</b></div>
+          <Field label="Stok Fisik"><Input type="number" value={opname.stock} onChange={e=>setOpname({...opname,stock:e.target.value})}/></Field>
+          <Field label="Alasan / Catatan"><Input value={opname.notes} onChange={e=>setOpname({...opname,notes:e.target.value})}/></Field>
+        </div>
+        <div className="flex justify-end gap-2 mt-6"><Button variant="outline" onClick={()=>setOpname(null)}>Batal</Button><Button onClick={doOpname}>Simpan Opname</Button></div>
+      </Modal>}
     </div>
   );
 }
@@ -63,6 +80,7 @@ export function Inventory() {
   const { rows: products } = useCRUD("products");
   const { rows: materials, reload: reloadMats } = useCRUD("materials");
   const [adjust, setAdjust] = useState(null);
+  const [opname, setOpname] = useState(null);
 
   useEffect(() => { api.get("/inventory/movements").then(r=>setMovements(r.data)); }, []);
 
@@ -76,6 +94,16 @@ export function Inventory() {
       toast.success("Stok diperbarui");
       setAdjust(null);
       reloadMats();
+      api.get("/inventory/movements").then(r=>setMovements(r.data));
+    } catch (e) { toast.error(formatErr(e.response?.data?.detail)); }
+  };
+
+  const doOpname = async () => {
+    try {
+      const payload = { kind: opname.kind, item_id: opname.itemId, variant_sku: opname.sku, physical_stock: Number(opname.stock), notes: opname.notes };
+      const { data } = await api.post("/inventory/opname", payload);
+      toast.success(`Opname tersimpan. Selisih: ${data.delta > 0 ? "+" : ""}${data.delta}`);
+      setOpname(null);
       api.get("/inventory/movements").then(r=>setMovements(r.data));
     } catch (e) { toast.error(formatErr(e.response?.data?.detail)); }
   };
@@ -99,7 +127,7 @@ export function Inventory() {
             {header:"Cost", cell:r=>fmtIDR(r.cost)},
             {header:"Value", cell:r=>fmtIDR(Number(r.stock)*Number(r.cost))},
             {header:"Status", cell:r=><StatusPill status={Number(r.stock)===0?"out_of_stock":(Number(r.stock)<=Number(r.product.minimum_stock||0)?"low_stock":"ok")}/>},
-            {header:"", cell:r=><Button variant="outline" onClick={()=>setAdjust({kind:"product",pid:r.product.id,sku:r.sku,qty:0,type:"adjustment",notes:""})} data-testid={`adjust-${r.sku}`}>Adjust</Button>},
+            {header:"", cell:r=><div className="flex gap-2"><Button variant="outline" onClick={()=>setAdjust({kind:"product",pid:r.product.id,sku:r.sku,qty:0,type:"adjustment",notes:""})} data-testid={`adjust-${r.sku}`}>Adjust</Button><Button variant="outline" onClick={()=>setOpname({kind:"product",itemId:r.product.id,sku:r.sku,stock:r.stock,notes:""})}>Opname</Button></div>},
           ]}/>
       )}
       {tab==="materials" && <Materials/>}
@@ -125,6 +153,14 @@ export function Inventory() {
           <Field label="Notes"><Input value={adjust.notes} onChange={e=>setAdjust({...adjust,notes:e.target.value})}/></Field>
         </div>
         <div className="flex justify-end gap-2 mt-6"><Button variant="outline" onClick={()=>setAdjust(null)}>Batal</Button><Button onClick={doAdjust} data-testid="btn-confirm-adjust">Simpan</Button></div>
+      </Modal>}
+      {opname && <Modal open onClose={()=>setOpname(null)} title="Stock Opname">
+        <div className="space-y-3">
+          <div className="text-sm text-muted-foreground">Stok sistem: <b>{fmtNum(opname.stock)}</b></div>
+          <Field label="Stok Fisik"><Input type="number" value={opname.stock} onChange={e=>setOpname({...opname,stock:e.target.value})} data-testid="opname-stock"/></Field>
+          <Field label="Alasan / Catatan"><Input value={opname.notes} onChange={e=>setOpname({...opname,notes:e.target.value})}/></Field>
+        </div>
+        <div className="flex justify-end gap-2 mt-6"><Button variant="outline" onClick={()=>setOpname(null)}>Batal</Button><Button onClick={doOpname} data-testid="btn-confirm-opname">Simpan Opname</Button></div>
       </Modal>}
     </div>
   );

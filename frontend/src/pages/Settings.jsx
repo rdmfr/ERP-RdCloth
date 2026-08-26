@@ -21,6 +21,7 @@ export default function Settings() {
   const [audit, setAudit] = useState([]);
   const [userModal, setUserModal] = useState(null);
   const [mpModal, setMpModal] = useState(null);
+  const [auditDetail, setAuditDetail] = useState(null);
 
   useEffect(() => { if (user?.role === "owner") api.get("/audit_logs").then(r=>setAudit(r.data)); }, [user]);
 
@@ -124,8 +125,12 @@ export default function Settings() {
             {header:"User",cell:r=><span className="font-mono text-xs">{r.user_email}</span>},
             {header:"Action",cell:r=><span className="text-[10px] uppercase font-bold tracking-widest">{r.action}</span>},
             {header:"Entity",cell:r=>r.entity},
+            {header:"Detail",cell:r=><Button variant="outline" onClick={()=>setAuditDetail(r)}>Lihat</Button>},
           ]}/>
       )}
+      {auditDetail && <Modal open onClose={()=>setAuditDetail(null)} title="Detail Audit">
+        <div className="space-y-3 text-sm"><div><b>Aksi:</b> {auditDetail.action}</div><div><b>Entity:</b> {auditDetail.entity}</div><div><b>Sebelum:</b><pre className="mt-1 p-3 rounded bg-stone-100 dark:bg-stone-900 overflow-auto text-xs">{JSON.stringify(auditDetail.old_value, null, 2)}</pre></div><div><b>Sesudah:</b><pre className="mt-1 p-3 rounded bg-stone-100 dark:bg-stone-900 overflow-auto text-xs">{JSON.stringify(auditDetail.new_value, null, 2)}</pre></div></div>
+      </Modal>}
     </div>
   );
 }

@@ -318,11 +318,11 @@ def collection_crud(name: str, module: str):
 
     @api.get(f"/{name}", dependencies=[Depends(require_module(module))])
     async def _list():
-        return await coll.find({}, {"_id": 0}).sort("created_at", -1).to_list(1000)
+        return await coll.find({"status": {"$ne": "archived"}}, {"_id": 0}).sort("created_at", -1).to_list(1000)
 
     @api.get(f"/{name}/{{item_id}}", dependencies=[Depends(require_module(module))])
     async def _get(item_id: str):
-        doc = await coll.find_one({"id": item_id}, {"_id": 0})
+        doc = await coll.find_one({"id": item_id, "status": {"$ne": "archived"}}, {"_id": 0})
         if not doc:
             raise HTTPException(404, "Not found")
         return doc
@@ -354,9 +354,11 @@ def collection_crud(name: str, module: str):
         old = await coll.find_one({"id": item_id}, {"_id": 0})
         if not old:
             raise HTTPException(404, "Not found")
-        await coll.delete_one({"id": item_id})
-        await audit(user, "delete", name, item_id, old, None)
-        return {"ok": True}
+        archived_at = now_iso()
+        await coll.update_one({"id": item_id}, {"$set": {"status": "archived", "archived_at": archived_at, "updated_at": archived_at}})
+        archived = await coll.find_one({"id": item_id}, {"_id": 0})
+        await audit(user, "archive", name, item_id, old, archived)
+        return {"ok": True, "archived": True}
 
 # Register CRUD for master data
 collection_crud("categories", "products")
@@ -371,11 +373,11 @@ collection_crud("settings_kv", "dashboard")
 # ---------- PRODUCTS (with variants) ----------
 @api.get("/products", dependencies=[Depends(require_module("products"))])
 async def list_products():
-    return await db.products.find({}, {"_id": 0}).sort("created_at", -1).to_list(1000)
+    return await db.products.find({"status": {"$ne": "archived"}}, {"_id": 0}).sort("created_at", -1).to_list(1000)
 
 @api.get("/products/{pid}", dependencies=[Depends(require_module("products"))])
 async def get_product(pid: str):
-    doc = await db.products.find_one({"id": pid}, {"_id": 0})
+    doc = await db.products.find_one({"id": pid, "status": {"$ne": "archived"}}, {"_id": 0})
     if not doc: raise HTTPException(404, "Not found")
     return doc
 
@@ -412,9 +414,11 @@ async def update_product(pid: str, body: Dict[str, Any], user: dict = Depends(re
 async def delete_product(pid: str, user: dict = Depends(require_module("products"))):
     old = await db.products.find_one({"id": pid}, {"_id": 0})
     if not old: raise HTTPException(404, "Not found")
-    await db.products.delete_one({"id": pid})
-    await audit(user, "delete", "product", pid, old, None)
-    return {"ok": True}
+    archived_at = now_iso()
+    await db.products.update_one({"id": pid}, {"$set": {"status": "archived", "archived_at": archived_at, "updated_at": archived_at}})
+    archived = await db.products.find_one({"id": pid}, {"_id": 0})
+    await audit(user, "archive", "product", pid, old, archived)
+    return {"ok": True, "archived": True}
 
 # ---------- MATERIALS (raw materials) ----------
 collection_crud("materials", "materials")
@@ -455,6 +459,45 @@ class VariantAdjustIn(BaseModel):
     quantity: float
     type: str = "adjustment"
     notes: str = ""
+
+class StockOpnameIn(BaseModel):
+    kind: str
+    item_id: str
+    variant_sku: Optional[str] = None
+    physical_stock: float
+    notes: str = ""
+
+@api.post("/inventory/opname")
+@transactional
+async def stock_opname(body: StockOpnameIn, user: dict = Depends(require_module("inventory"))):
+    physical = nonnegative(body.physical_stock, "Physical stock")
+    if body.kind == "material":
+        item = await db.materials.find_one({"id": body.item_id})
+        if not item:
+            raise HTTPException(404, "Material not found")
+        before = float(item.get("stock", 0))
+        await db.materials.update_one({"id": body.item_id}, {"$set": {"stock": physical, "updated_at": now_iso()}})
+        target = body.item_id
+    elif body.kind == "product":
+        if not body.variant_sku:
+            raise HTTPException(400, "Variant SKU is required")
+        item = await db.products.find_one({"id": body.item_id})
+        if not item:
+            raise HTTPException(404, "Product not found")
+        variants = item.get("variants", [])
+        variant = next((value for value in variants if value.get("sku") == body.variant_sku), None)
+        if not variant:
+            raise HTTPException(404, "Variant not found")
+        before = float(variant.get("stock", 0))
+        variant["stock"] = physical
+        await db.products.update_one({"id": body.item_id}, {"$set": {"variants": variants, "updated_at": now_iso()}})
+        target = body.variant_sku
+    else:
+        raise HTTPException(400, "Invalid inventory kind")
+    delta = physical - before
+    await record_movement(body.kind, target, "opname", delta, "opname", before, physical, user["id"], body.notes)
+    await audit(user, "opname", body.kind, target, {"stock": before}, {"stock": physical, "delta": delta, "notes": body.notes})
+    return {"ok": True, "before": before, "after": physical, "delta": delta}
 
 @api.post("/inventory/products/adjust")
 async def adjust_variant(body: VariantAdjustIn, user: dict = Depends(require_module("inventory"))):

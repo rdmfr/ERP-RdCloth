@@ -230,6 +230,7 @@ python -m pip check
 ### P1 - Wajib untuk operasional harian
 
 - Validasi numerik dan status transition harus konsisten di frontend dan backend. Validasi nominal finance, duplicate order number, dan material PO sudah diperketat di backend.
+- Search dan pagination tersedia pada tabel data; stock opname produk/bahan mencatat delta, movement, dan audit log; master data di-archive secara soft delete.
 - Cegah marketplace import duplikat berdasarkan `order_number` dan sediakan laporan item gagal.
 - Jangan melewati material PO yang tidak ditemukan secara diam-diam; proses harus gagal dengan alasan yang jelas.
 - Tambahkan pagination, filter tanggal/status, dan pencarian server-side untuk tabel besar.
@@ -237,7 +238,7 @@ python -m pip check
 
 ### P2 - Fitur yang belum lengkap
 
-- Global search dan notification di topbar masih berupa UI tanpa workflow penuh.
+- Global search topbar dan notification masih berupa UI tanpa workflow penuh; tabel data sudah memiliki pencarian lokal dan pagination.
 - Sales, Purchase Order, dan Production Order belum memiliki edit/reopen workflow yang lengkap.
 - Business profile masih ditampilkan statis dan belum dapat diedit penuh.
 - User lifecycle belum mencakup edit, nonaktifkan, reset password, dan revoke session.

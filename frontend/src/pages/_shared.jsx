@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, fmtIDR, fmtNum, formatErr } from "@/lib/api";
 import { toast } from "sonner";
 import { Plus, Edit, Trash2, X } from "lucide-react";
@@ -69,22 +69,47 @@ export function Button({ variant="primary", ...p }) {
   return <button {...p} className={`px-4 py-2 rounded-md text-sm font-semibold transition-colors disabled:opacity-50 ${styles[variant]} ${p.className||""}`} />;
 }
 
-export function DataTable({ columns, rows, empty = "Belum ada data", testid }) {
+export function DataTable({ columns, rows, empty = "Belum ada data", testid, searchable = true, pageSize = 25 }) {
+  const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
+  const filteredRows = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    if (!query) return rows;
+    return rows.filter((row) => Object.values(row || {}).some((value) =>
+      typeof value !== "object" && String(value ?? "").toLowerCase().includes(query)
+    ));
+  }, [rows, search]);
+  const pageCount = Math.max(1, Math.ceil(filteredRows.length / pageSize));
+  const visibleRows = filteredRows.slice((page - 1) * pageSize, page * pageSize);
+  useEffect(() => { setPage(1); }, [search, rows.length]);
   return (
-    <div className="rounded-lg border border-border bg-card overflow-x-auto scroll-thin" data-testid={testid}>
+    <div className="rounded-lg border border-border bg-card overflow-hidden" data-testid={testid}>
+      {searchable && <div className="flex items-center justify-between gap-3 p-3 border-b border-border">
+        <Input aria-label="Cari data" placeholder="Cari data..." value={search} onChange={(event) => setSearch(event.target.value)} className="max-w-sm" />
+        <span className="text-xs text-muted-foreground whitespace-nowrap">{filteredRows.length} data</span>
+      </div>}
+      <div className="overflow-x-auto scroll-thin">
       <table className="w-full text-sm">
         <thead className="bg-stone-100 dark:bg-stone-900 text-[10px] uppercase tracking-widest text-muted-foreground">
           <tr>{columns.map((c, i) => <th key={i} className="text-left px-4 py-3 font-semibold whitespace-nowrap">{c.header}</th>)}</tr>
         </thead>
         <tbody>
-          {rows.length === 0 && <tr><td colSpan={columns.length} className="text-center py-12 text-muted-foreground">{empty}</td></tr>}
-          {rows.map((r, i) => (
+          {visibleRows.length === 0 && <tr><td colSpan={columns.length} className="text-center py-12 text-muted-foreground">{empty}</td></tr>}
+          {visibleRows.map((r, i) => (
             <tr key={i} className="border-t border-border hover:bg-stone-50 dark:hover:bg-stone-900/50">
               {columns.map((c, j) => <td key={j} className="px-4 py-3">{c.cell(r)}</td>)}
             </tr>
           ))}
         </tbody>
       </table>
+      </div>
+      {pageCount > 1 && <div className="flex items-center justify-between p-3 border-t border-border">
+        <span className="text-xs text-muted-foreground">Halaman {page} dari {pageCount}</span>
+        <div className="flex gap-2">
+          <Button variant="outline" disabled={page === 1} onClick={() => setPage((current) => current - 1)}>Sebelumnya</Button>
+          <Button variant="outline" disabled={page === pageCount} onClick={() => setPage((current) => current + 1)}>Berikutnya</Button>
+        </div>
+      </div>}
     </div>
   );
 }
