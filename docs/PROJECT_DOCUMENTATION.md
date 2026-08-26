@@ -223,6 +223,7 @@ python -m pip check
 - Batasi CORS ke domain frontend resmi dan gunakan HTTPS.
 - Tambahkan rate limiting dan audit untuk login yang gagal.
 - Gunakan MongoDB transaction/session untuk sales, cancel sales, receive PO, production complete, dan marketplace import. Preflight validation sudah mencegah sebagian mutasi parsial, tetapi belum menggantikan transaction.
+- Endpoint transaksi utama sudah dibungkus MongoDB transaction; deployment wajib memakai MongoDB Atlas/replica set dan bukan MongoDB standalone.
 - Buat backup Atlas terjadwal, uji restore, dan tentukan retention policy.
 - Pastikan `SKIP_DEMO_SEED=1` setelah data awal dibuat.
 

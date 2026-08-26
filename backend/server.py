@@ -7,6 +7,9 @@ import os
 import uuid
 import logging
 import math
+import contextvars
+from contextlib import asynccontextmanager
+from functools import wraps
 import bcrypt
 import jwt
 from datetime import datetime, timezone, timedelta
@@ -52,6 +55,56 @@ if use_mock:
     client = mongomock_motor.AsyncMongoMockClient()
 
 db = client[DB_NAME]
+
+_mongo_session = contextvars.ContextVar("mongo_session", default=None)
+
+class _SessionCollection:
+    def __init__(self, collection):
+        self._collection = collection
+
+    def __getattr__(self, name):
+        operation = getattr(self._collection, name)
+        if name in {"find", "find_one", "insert_one", "insert_many", "update_one", "delete_one", "count_documents", "create_index"}:
+            def with_session(*args, **kwargs):
+                session = _mongo_session.get()
+                if session is not None:
+                    kwargs.setdefault("session", session)
+                return operation(*args, **kwargs)
+            return with_session
+        return operation
+
+class _SessionDatabase:
+    def __init__(self, database):
+        self._database = database
+
+    def __getitem__(self, name):
+        return _SessionCollection(self._database[name])
+
+    def __getattr__(self, name):
+        return getattr(self._database, name)
+
+db = _SessionDatabase(client[DB_NAME])
+
+@asynccontextmanager
+async def mongo_transaction():
+    if use_mock:
+        yield
+        return
+    session = await client.start_session()
+    token = _mongo_session.set(session)
+    try:
+        async with session.start_transaction():
+            yield
+    finally:
+        _mongo_session.reset(token)
+        await session.end_session()
+
+def transactional(handler):
+    @wraps(handler)
+    async def wrapped(*args, **kwargs):
+        async with mongo_transaction():
+            return await handler(*args, **kwargs)
+    return wrapped
 
 app = FastAPI(title="RdCloth ERP API")
 api = APIRouter(prefix="/api")
@@ -449,6 +502,7 @@ async def create_po(body: Dict[str, Any], user: dict = Depends(require_module("p
     return body
 
 @api.post("/purchase_orders/{po_id}/receive")
+@transactional
 async def receive_po(po_id: str, user: dict = Depends(require_module("purchasing"))):
     po = await db.purchase_orders.find_one({"id": po_id})
     if not po: raise HTTPException(404, "PO not found")
@@ -500,6 +554,7 @@ async def create_prod(body: Dict[str, Any], user: dict = Depends(require_module(
     return body
 
 @api.post("/production_orders/{pid}/complete")
+@transactional
 async def complete_production(pid: str, body: Dict[str, Any], user: dict = Depends(require_module("production"))):
     po = await db.production_orders.find_one({"id": pid})
     if not po: raise HTTPException(404, "Not found")
@@ -572,6 +627,7 @@ async def list_sales():
     return await db.sales_orders.find({}, {"_id": 0}).sort("created_at", -1).to_list(1000)
 
 @api.post("/sales_orders")
+@transactional
 async def create_sales(body: Dict[str, Any], user: dict = Depends(require_module("sales"))):
     body["id"] = body.get("id") or new_id()
     body["order_number"] = body.get("order_number") or f"SO-{datetime.now().strftime('%y%m%d')}-{body['id'][:4].upper()}"
@@ -700,6 +756,7 @@ class FinTxnIn(BaseModel):
     date: Optional[str] = None
 
 @api.post("/financial_transactions")
+@transactional
 async def create_txn(body: FinTxnIn, user: dict = Depends(require_module("finance"))):
     await create_financial_transaction(user, body.type, body.amount, body.account_id, body.description, "manual", "")
     return {"ok": True}
@@ -710,6 +767,7 @@ async def list_expenses():
     return await db.expenses.find({}, {"_id": 0}).sort("date", -1).to_list(1000)
 
 @api.post("/expenses")
+@transactional
 async def create_expense(body: Dict[str, Any], user: dict = Depends(require_module("finance"))):
     body["id"] = body.get("id") or new_id()
     body["created_at"] = now_iso()
@@ -723,6 +781,7 @@ async def create_expense(body: Dict[str, Any], user: dict = Depends(require_modu
 
 # ---------- SALES ORDER CANCEL ----------
 @api.post("/sales_orders/{sid}/cancel")
+@transactional
 async def cancel_sale(sid: str, user: dict = Depends(require_module("sales"))):
     so = await db.sales_orders.find_one({"id": sid})
     if not so:
@@ -777,6 +836,7 @@ class BulkImportIn(BaseModel):
     orders: List[ImportOrderIn]
 
 @api.post("/marketplace/import")
+@transactional
 async def import_marketplace_orders(body: BulkImportIn, user: dict = Depends(require_module("sales"))):
     created = 0
     skipped = []
@@ -835,6 +895,7 @@ class OnboardingIn(BaseModel):
     account_name: str = "Kas Tunai"
 
 @api.post("/onboarding/complete")
+@transactional
 async def complete_onboarding(body: OnboardingIn, user: dict = Depends(require_role("owner"))):
     # save business profile
     await db.settings_kv.update_one(
