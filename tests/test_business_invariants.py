@@ -68,6 +68,39 @@ class BusinessInvariantTests(unittest.IsolatedAsyncioTestCase):
         value = server.json_safe({"id": ObjectId("507f1f77bcf86cd799439011")})
         self.assertEqual(value["id"], "507f1f77bcf86cd799439011")
 
+    async def test_core_business_flow(self):
+        await server.db.accounts.insert_one({"id": "account-1", "name": "Kas", "balance": 0, "is_default": True})
+        await server.db.materials.insert_one({"id": "material-1", "name": "Kain", "stock": 10, "cost": 5})
+        await server.db.products.insert_one({
+            "id": "product-1", "name": "Kaos", "variants": [{"sku": "SKU-1", "stock": 0, "cost": 10, "selling_price": 30}],
+        })
+
+        po = await server.create_po({
+            "supplier_id": "supplier-1", "items": [{"material_id": "material-1", "quantity": 2, "unit_cost": 6}],
+            "payment_status": "paid",
+        }, self.user)
+        await server.receive_po(po["id"], self.user)
+        material = await server.db.materials.find_one({"id": "material-1"})
+        self.assertEqual(material["stock"], 12)
+
+        production = await server.create_prod({
+            "product_id": "product-1", "variant_sku": "SKU-1", "quantity": 2,
+            "bom_items": [{"material_id": "material-1", "quantity": 1}],
+        }, self.user)
+        await server.complete_production(production["id"], {"quantity_passed": 2, "quantity_rejected": 0}, self.user)
+
+        sale = await server.create_sales({
+            "order_number": "SO-FLOW-1", "items": [{"product_id": "product-1", "variant_sku": "SKU-1", "quantity": 1, "selling_price": 30}],
+            "payment_status": "paid",
+        }, self.user)
+        product = await server.db.products.find_one({"id": "product-1"})
+        self.assertEqual(product["variants"][0]["stock"], 1)
+        await server.cancel_sale(sale["id"], self.user)
+        product = await server.db.products.find_one({"id": "product-1"})
+        self.assertEqual(product["variants"][0]["stock"], 2)
+        cancelled = await server.db.sales_orders.find_one({"id": sale["id"]})
+        self.assertEqual(cancelled["fulfillment_status"], "cancelled")
+
 
 if __name__ == "__main__":
     unittest.main()
