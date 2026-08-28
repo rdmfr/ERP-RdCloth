@@ -6,8 +6,10 @@ import { toast } from "sonner";
 export function Purchasing() {
   const [rows, setRows] = useState([]);
   const [creating, setCreating] = useState(false);
+  const [paying, setPaying] = useState(null);
   const { rows: suppliers } = useCRUD("suppliers");
   const { rows: materials } = useCRUD("materials");
+  const { rows: accounts } = useCRUD("accounts");
 
   const reload = () => api.get("/purchase_orders").then(r=>setRows(r.data));
   useEffect(() => { reload(); }, []);
@@ -15,6 +17,10 @@ export function Purchasing() {
   const receive = async (id) => {
     if (!confirm("Terima PO ini? Stok akan bertambah.")) return;
     try { await api.post(`/purchase_orders/${id}/receive`); toast.success("PO diterima"); reload(); }
+    catch (e) { toast.error(formatErr(e.response?.data?.detail)); }
+  };
+  const pay = async () => {
+    try { await api.post(`/purchase_orders/${paying.id}/pay`, { account_id:paying.account_id }); toast.success("Hutang supplier dilunasi"); setPaying(null); reload(); }
     catch (e) { toast.error(formatErr(e.response?.data?.detail)); }
   };
 
@@ -32,15 +38,17 @@ export function Purchasing() {
           { header:"Total", cell:r=><span className="font-bold">{fmtIDR(r.total)}</span> },
           { header:"Payment", cell:r=><StatusPill status={r.payment_status}/> },
           { header:"Received", cell:r=><StatusPill status={r.received_status}/> },
-          { header:"", cell:r=>r.received_status!=="received" && <Button variant="outline" onClick={()=>receive(r.id)} data-testid={`receive-po-${r.id}`}>Receive</Button> },
+          { header:"", cell:r=><div className="flex gap-2">{r.received_status!=="received" && <Button variant="outline" onClick={()=>receive(r.id)} data-testid={`receive-po-${r.id}`}>Receive</Button>}{r.received_status==="received" && r.payment_status!=="paid" && <Button variant="outline" onClick={()=>setPaying({id:r.id,account_id:accounts.find(a=>a.is_default)?.id||accounts[0]?.id||""})}>Bayar Hutang</Button>}</div> },
         ]}/>
-      {creating && <POForm suppliers={suppliers} materials={materials} onClose={()=>setCreating(false)} onDone={()=>{ setCreating(false); reload(); }} />}
+      {creating && <POForm suppliers={suppliers} materials={materials} accounts={accounts} onClose={()=>setCreating(false)} onDone={()=>{ setCreating(false); reload(); }} />}
+      {paying && <Modal open onClose={()=>setPaying(null)} title="Bayar Hutang Supplier"><Field label="Bayar dari akun"><Select value={paying.account_id} onChange={e=>setPaying({...paying,account_id:e.target.value})}>{accounts.map(a=><option key={a.id} value={a.id}>{a.name} ({fmtIDR(a.balance||0)})</option>)}</Select></Field><div className="flex justify-end gap-2 mt-6"><Button variant="outline" onClick={()=>setPaying(null)}>Batal</Button><Button onClick={pay}>Bayar</Button></div></Modal>}
     </div>
   );
 }
 
-function POForm({ suppliers, materials, onClose, onDone }) {
-  const [form, setForm] = useState({ supplier_id:"", date: new Date().toISOString().slice(0,10), items:[], discount:0, shipping:0, tax:0, payment_status:"unpaid" });
+function POForm({ suppliers, materials, accounts, onClose, onDone }) {
+  const defaultAccount = accounts.find(a=>a.is_default)?.id || accounts[0]?.id || "";
+  const [form, setForm] = useState({ supplier_id:"", account_id:defaultAccount, date: new Date().toISOString().slice(0,10), items:[], discount:0, shipping:0, tax:0, payment_status:"unpaid" });
   const [row, setRow] = useState({ material_id:"", quantity:1, unit_cost:0 });
   const add = () => {
     const m = materials.find(x=>x.id===row.material_id); if (!m) return;
@@ -65,6 +73,12 @@ function POForm({ suppliers, materials, onClose, onDone }) {
           </Select>
         </Field>
         <Field label="Tanggal"><Input type="date" value={form.date} onChange={e=>setForm({...form,date:e.target.value})}/></Field>
+        <Field label="Bayar dari akun">
+          <Select value={form.account_id} onChange={e=>setForm({...form,account_id:e.target.value})} data-testid="po-account">
+            <option value="">-- Pilih akun --</option>
+            {accounts.map(a=><option key={a.id} value={a.id}>{a.name} ({fmtIDR(a.balance||0)})</option>)}
+          </Select>
+        </Field>
       </div>
       <div className="text-[10px] uppercase font-bold tracking-widest text-muted-foreground mb-2">Items</div>
       <div className="grid grid-cols-[1fr_100px_140px_auto] gap-2 items-end mb-2">

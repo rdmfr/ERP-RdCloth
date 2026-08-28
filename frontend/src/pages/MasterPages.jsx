@@ -6,9 +6,10 @@ import { toast } from "sonner";
 export function Materials() {
   const { rows, save, remove, reload } = useCRUD("materials");
   const { rows: suppliers } = useCRUD("suppliers");
+  const { rows: accounts } = useCRUD("accounts");
   const [editing, setEditing] = useState(null);
   const [opname, setOpname] = useState(null);
-  const openNew = () => setEditing({ name:"", unit:"pcs", stock:0, cost:0, minimum_stock:0 });
+  const openNew = () => setEditing({ name:"", unit:"pcs", stock:0, cost:0, minimum_stock:0, purchase_payment_status:"unpaid", purchase_account_id:accounts.find(a=>a.is_default)?.id || accounts[0]?.id || "" });
   const doOpname = async () => {
     try {
       const { data } = await api.post("/inventory/opname", { kind:"material", item_id:opname.id, physical_stock:Number(opname.stock), notes:opname.notes });
@@ -56,6 +57,18 @@ export function Materials() {
               {suppliers.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}
             </Select>
           </Field>
+          {!editing.id && <Field label="Pembayaran stok awal">
+            <Select value={editing.purchase_payment_status} onChange={e=>setEditing({...editing,purchase_payment_status:e.target.value})}>
+              <option value="unpaid">Belum dibayar</option>
+              <option value="paid">Sudah dibayar</option>
+            </Select>
+          </Field>}
+          {!editing.id && editing.purchase_payment_status === "paid" && <Field label="Bayar dari akun">
+            <Select value={editing.purchase_account_id} onChange={e=>setEditing({...editing,purchase_account_id:e.target.value})}>
+              <option value="">-- Pilih akun --</option>
+              {accounts.map(a=><option key={a.id} value={a.id}>{a.name} ({fmtIDR(a.balance||0)})</option>)}
+            </Select>
+          </Field>}
         </div>
         <div className="flex justify-end gap-2 mt-6 pt-4 border-t border-border">
           <Button variant="outline" onClick={()=>setEditing(null)}>Batal</Button>
@@ -255,5 +268,19 @@ export function Assets() {
       {key:"name",label:"Nama"},{key:"purchase_price",label:"Harga Beli",type:"number",render:r=>fmtIDR(r.purchase_price)},
       {key:"purchase_date",label:"Tanggal Beli"},{key:"useful_life_years",label:"Umur (tahun)",type:"number"},
       {key:"residual_value",label:"Nilai Residu",type:"number",render:r=>fmtIDR(r.residual_value)},
+    ]}/>;
+}
+
+export function MarketplaceSettings() {
+  return <MasterDataPage endpoint="marketplaces" title="Marketplace Fees" subtitle="Atur komisi dan biaya Shopee / TikTok Shop"
+    fields={[
+      {key:"name",label:"Marketplace"},
+      {key:"admin_fee_pct",label:"Platform %",type:"number"},
+      {key:"service_fee_pct",label:"Dynamic / Service %",type:"number"},
+      {key:"payment_fee_pct",label:"Payment %",type:"number"},
+      {key:"handling_fee",label:"Handling Fee",type:"number",render:r=>fmtIDR(r.handling_fee||0)},
+      {key:"logistics_fee",label:"Logistics Fee",type:"number",render:r=>fmtIDR(r.logistics_fee||0)},
+      {key:"commission_cap",label:"Commission Cap",type:"number",render:r=>fmtIDR(r.commission_cap||0)},
+      {key:"return_fee_cap",label:"Return Fee Cap",type:"number",render:r=>fmtIDR(r.return_fee_cap||0)},
     ]}/>;
 }

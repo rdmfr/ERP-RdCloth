@@ -91,6 +91,84 @@ export function HPPCalculator() {
   );
 }
 
+export function DTFCosting() {
+  const [form, setForm] = useState({
+    design_name: "Vibe Graphite",
+    quantity: 20,
+    blank_cost: 30000,
+    dtf_transfer_cost: 15000,
+    printing_cost: 5000,
+    labor_cost: 3000,
+    packaging_cost: 2000,
+    design_setup_cost: 50000,
+    reject_rate: 0.1,
+    selling_price: 95000,
+  });
+  const [result, setResult] = useState(null);
+
+  const calc = async () => {
+    try {
+      const { data } = await api.post("/dtf/costing", {
+        ...form,
+        quantity: Number(form.quantity),
+        blank_cost: Number(form.blank_cost),
+        dtf_transfer_cost: Number(form.dtf_transfer_cost),
+        printing_cost: Number(form.printing_cost),
+        labor_cost: Number(form.labor_cost),
+        packaging_cost: Number(form.packaging_cost),
+        design_setup_cost: Number(form.design_setup_cost),
+        reject_rate: Number(form.reject_rate),
+        selling_price: Number(form.selling_price),
+      });
+      setResult(data);
+    } catch (e) {
+      toast.error("Gagal menghitung costing DTF");
+    }
+  };
+
+  return (
+    <div>
+      <PageHeader title="DTF Costing" subtitle="Hitung biaya custom design, reject, dan harga jual ideal"/>
+      <div className="grid lg:grid-cols-2 gap-4">
+        <div className="p-6 rounded-lg border border-border bg-card space-y-4">
+          <Field label="Nama Design"><Input value={form.design_name} onChange={e=>setForm({...form, design_name:e.target.value})}/></Field>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Qty"><Input type="number" value={form.quantity} onChange={e=>setForm({...form, quantity:e.target.value})}/></Field>
+            <Field label="Reject Rate"><Input type="number" step="0.01" value={form.reject_rate} onChange={e=>setForm({...form, reject_rate:e.target.value})}/></Field>
+            <Field label="Blank Cost"><Input type="number" value={form.blank_cost} onChange={e=>setForm({...form, blank_cost:e.target.value})}/></Field>
+            <Field label="DTF Transfer"><Input type="number" value={form.dtf_transfer_cost} onChange={e=>setForm({...form, dtf_transfer_cost:e.target.value})}/></Field>
+            <Field label="Printing Cost"><Input type="number" value={form.printing_cost} onChange={e=>setForm({...form, printing_cost:e.target.value})}/></Field>
+            <Field label="Labor"><Input type="number" value={form.labor_cost} onChange={e=>setForm({...form, labor_cost:e.target.value})}/></Field>
+            <Field label="Packaging"><Input type="number" value={form.packaging_cost} onChange={e=>setForm({...form, packaging_cost:e.target.value})}/></Field>
+            <Field label="Design Setup"><Input type="number" value={form.design_setup_cost} onChange={e=>setForm({...form, design_setup_cost:e.target.value})}/></Field>
+            <Field label="Selling Price"><Input type="number" value={form.selling_price} onChange={e=>setForm({...form, selling_price:e.target.value})}/></Field>
+          </div>
+          <Button onClick={calc} className="w-full">Hitung Costing</Button>
+        </div>
+
+        <div className="p-6 rounded-lg border border-border bg-card">
+          {!result && <div className="text-sm text-muted-foreground py-16 text-center">Masukkan biaya custom design dan hitung.</div>}
+          {result && (
+            <div className="space-y-3" data-testid="dtf-result">
+              <Row label="Design" value={result.design_name} />
+              <Row label="Qty" value={fmtNum(result.quantity)} />
+              <Row label="Reject Qty" value={fmtNum(result.reject_qty)} tone="danger" />
+              <Row label="Unit Cost" value={fmtIDR(result.unit_cost)} />
+              <Row label="Total Cost" value={fmtIDR(result.total_cost)} />
+              <Row label="Suggested Price" value={fmtIDR(result.suggested_price)} tone="success" />
+              <Row label="Gross Profit" value={fmtIDR(result.gross_profit)} tone={result.gross_profit >= 0 ? "success" : "danger"} big />
+              <div className="pt-3 border-t border-border">
+                <div className="text-[10px] uppercase font-bold tracking-widest text-muted-foreground">Margin</div>
+                <div className="text-3xl font-display font-bold">{result.margin_percent}%</div>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Row({ label, value, tone, big }) {
   const toneClr = tone==="success"?"text-emerald-600":tone==="danger"?"text-rose-600":"";
   return <div className="flex items-baseline justify-between border-b border-border pb-2"><span className="text-sm text-muted-foreground">{label}</span><span className={`font-display font-bold ${big?"text-2xl":"text-base"} ${toneClr}`}>{value}</span></div>;
@@ -214,11 +292,14 @@ export function BEPCalculator() {
 
 export function Reports() {
   const [pl, setPl] = useState(null);
+  const [breakdown, setBreakdown] = useState({ by_channel: [], by_design: [] });
   const [start, setStart] = useState("");
   const [end, setEnd] = useState("");
   const load = useCallback(async () => {
     const { data } = await api.get(`/reports/profit_loss?start=${start}&end=${end}`);
     setPl(data);
+    const { data: detail } = await api.get(`/reports/profit_breakdown?start=${start}&end=${end}`);
+    setBreakdown(detail);
   }, [start, end]);
   useEffect(() => { load(); }, [load]);
   const exportCSV = () => {
@@ -253,6 +334,10 @@ export function Reports() {
             <Row2 label="Net Profit" v={pl.net_profit} tone={pl.net_profit>=0?"pos":"neg"} bold big/>
           </div>
         )}
+      </div>
+      <div className="grid lg:grid-cols-2 gap-4 mt-4">
+        <div className="p-6 rounded-lg border border-border bg-card"><h3 className="font-display font-bold text-lg mb-3">Profit per Channel</h3><table className="w-full text-sm"><thead className="text-[10px] uppercase text-muted-foreground"><tr><th className="text-left p-2">Channel</th><th className="text-right p-2">Orders</th><th className="text-right p-2">Profit</th></tr></thead><tbody>{breakdown.by_channel.map(row=><tr key={row.channel} className="border-t border-border"><td className="p-2">{row.channel}</td><td className="p-2 text-right">{row.orders}</td><td className="p-2 text-right font-bold">{fmtIDR(row.profit)}</td></tr>)}</tbody></table></div>
+        <div className="p-6 rounded-lg border border-border bg-card"><h3 className="font-display font-bold text-lg mb-3">Profit per Produk / Design</h3><table className="w-full text-sm"><thead className="text-[10px] uppercase text-muted-foreground"><tr><th className="text-left p-2">Design</th><th className="text-right p-2">Qty</th><th className="text-right p-2">Profit</th></tr></thead><tbody>{breakdown.by_design.map(row=><tr key={row.design} className="border-t border-border"><td className="p-2">{row.design}</td><td className="p-2 text-right">{row.quantity}</td><td className="p-2 text-right font-bold">{fmtIDR(row.profit)}</td></tr>)}</tbody></table></div>
       </div>
     </div>
   );

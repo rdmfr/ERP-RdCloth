@@ -7,10 +7,10 @@ import Layout from "@/components/Layout";
 import Login from "@/pages/Login";
 import Dashboard from "@/pages/Dashboard";
 import Products from "@/pages/Products";
-import { Inventory, Suppliers, Customers, Assets, Materials } from "@/pages/MasterPages";
+import { Inventory, Suppliers, Customers, Assets, Materials, MarketplaceSettings } from "@/pages/MasterPages";
 import { Purchasing, Production } from "@/pages/Operations";
-import { Sales, Finance } from "@/pages/Transactions";
-import { HPPCalculator, PricingSimulator, BEPCalculator, Reports } from "@/pages/Calculators";
+import { Sales, Finance, MarketplaceSettlement, Returns } from "@/pages/Transactions";
+import { HPPCalculator, PricingSimulator, BEPCalculator, Reports, DTFCosting } from "@/pages/Calculators";
 import Settings from "@/pages/Settings";
 import MarketplaceImport from "@/pages/MarketplaceImport";
 import OnboardingWizard, { useOnboardingStatus } from "@/pages/OnboardingWizard";
@@ -40,8 +40,12 @@ function AppRoutes() {
       <Route path="/suppliers" element={<Shell module="suppliers"><Suppliers/></Shell>}/>
       <Route path="/customers" element={<Shell module="customers"><Customers/></Shell>}/>
       <Route path="/finance" element={<Shell module="finance"><Finance/></Shell>}/>
+      <Route path="/settlements" element={<Shell module="finance"><MarketplaceSettlement/></Shell>}/>
+      <Route path="/returns" element={<Shell module="sales"><Returns/></Shell>}/>
+      <Route path="/marketplace-settings" element={<Shell module="finance"><MarketplaceSettings/></Shell>}/>
       <Route path="/reports" element={<Shell module="reports"><Reports/></Shell>}/>
       <Route path="/pricing" element={<Shell module="dashboard"><PricingCombined/></Shell>}/>
+      <Route path="/dtf-costing" element={<Shell module="production"><DTFCosting/></Shell>}/>
       <Route path="/bep" element={<Shell module="dashboard"><BEPCalculator/></Shell>}/>
       <Route path="/assets" element={<Shell module="assets"><Assets/></Shell>}/>
       <Route path="/settings" element={<Shell module="dashboard"><Settings/></Shell>}/>
@@ -54,6 +58,7 @@ function AppRoutes() {
 function PricingCombined() {
   return (
     <div className="space-y-8">
+      <DTFCosting/>
       <HPPCalculator/>
       <PricingSimulator/>
     </div>

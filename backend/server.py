@@ -67,7 +67,7 @@ class _SessionCollection:
 
     def __getattr__(self, name):
         operation = getattr(self._collection, name)
-        if name in {"find", "find_one", "insert_one", "insert_many", "update_one", "delete_one", "count_documents", "create_index"}:
+        if name in {"find", "find_one", "insert_one", "insert_many", "update_one", "update_many", "delete_one", "count_documents", "create_index"}:
             def with_session(*args, **kwargs):
                 session = _mongo_session.get()
                 if session is not None:
@@ -373,7 +373,17 @@ def collection_crud(name: str, module: str):
         body["id"] = body.get("id") or new_id()
         body["created_at"] = now_iso()
         body["updated_at"] = now_iso()
+        purchase_payment_status = body.pop("purchase_payment_status", "unpaid") if name == "materials" else "unpaid"
+        purchase_account_id = body.pop("purchase_account_id", None) if name == "materials" else None
+        purchase_amount = 0
+        if name == "materials" and purchase_payment_status == "paid":
+            purchase_amount = nonnegative(body.get("stock", 0), "Initial stock") * nonnegative(body.get("cost", 0), "Material cost")
         await coll.insert_one(body)
+        if name == "materials" and purchase_amount > 0:
+            await create_financial_transaction(
+                user, "expense", purchase_amount, purchase_account_id,
+                f"Pembelian bahan {body.get('name', '')}", "material_purchase", body["id"],
+            )
         await audit(user, "create", name, body["id"], None, body)
         body.pop("_id", None)
         return body
@@ -634,6 +644,21 @@ async def receive_po(po_id: str, user: dict = Depends(require_module("purchasing
         await create_financial_transaction(user, "expense", float(po["total"]), po.get("account_id"), f"Purchase {po['po_number']}", "purchase_order", po_id)
     return {"ok": True}
 
+
+@api.post("/purchase_orders/{po_id}/pay")
+@transactional
+async def pay_purchase_order(po_id: str, body: Dict[str, Any], user: dict = Depends(require_module("finance"))):
+    po = await db.purchase_orders.find_one({"id": po_id})
+    if not po:
+        raise HTTPException(404, "PO not found")
+    if po.get("payment_status") == "paid":
+        raise HTTPException(400, "Purchase order already paid")
+    if po.get("received_status") != "received":
+        raise HTTPException(400, "Receive the purchase order before paying it")
+    await create_financial_transaction(user, "expense", float(po.get("total", 0)), body.get("account_id"), f"Pelunasan {po['po_number']}", "purchase_order", po_id)
+    await db.purchase_orders.update_one({"id": po_id}, {"$set": {"payment_status": "paid", "paid_at": now_iso(), "payment_account_id": body.get("account_id"), "updated_at": now_iso()}})
+    return {"ok": True, "payment_status": "paid"}
+
 # ---------- PRODUCTION ----------
 @api.get("/production_orders", dependencies=[Depends(require_module("production"))])
 async def list_prod():
@@ -723,6 +748,32 @@ async def complete_production(pid: str, body: Dict[str, Any], user: dict = Depen
     return {"ok": True, "material_cost": total_material_cost}
 
 # ---------- SALES ORDERS ----------
+async def calculate_marketplace_fee(channel: str, fee_base: float, explicit_fee: Any = None) -> float:
+    if explicit_fee is not None:
+        return nonnegative(explicit_fee, "Marketplace fee")
+    marketplace = await db.marketplaces.find_one({"name": channel})
+    if not marketplace:
+        return 0
+    fee_pct = sum(float(marketplace.get(field, 0)) for field in ("admin_fee_pct", "service_fee_pct", "payment_fee_pct"))
+    commission = fee_base * fee_pct / 100
+    cap = nonnegative(marketplace.get("commission_cap", 0), "Commission cap")
+    if cap > 0:
+        commission = min(commission, cap)
+    return commission
+
+
+def is_marketplace_channel(channel: str) -> bool:
+    return channel in {"Shopee", "TikTok Shop"}
+
+
+async def get_marketplace_fixed_fees(channel: str) -> dict:
+    marketplace = await db.marketplaces.find_one({"name": channel}) or {}
+    return {
+        "handling_fee": nonnegative(marketplace.get("handling_fee", 0), "Handling fee"),
+        "logistics_fee": nonnegative(marketplace.get("logistics_fee", 0), "Logistics fee"),
+        "return_fee_cap": nonnegative(marketplace.get("return_fee_cap", 0), "Return fee cap"),
+    }
+
 @api.get("/sales_orders", dependencies=[Depends(require_module("sales"))])
 async def list_sales():
     return await db.sales_orders.find({}, {"_id": 0}).sort("created_at", -1).to_list(1000)
@@ -785,24 +836,42 @@ async def create_sales(body: Dict[str, Any], user: dict = Depends(require_module
     discount = float(body.get("discount", 0))
     voucher = float(body.get("voucher", 0))
     shipping = float(body.get("shipping", 0))
-    marketplace_fee = float(body.get("marketplace_fee", 0))
-    other_fee = float(body.get("other_fee", 0))
+    sales_channel = body.get("sales_channel", "Direct")
+    fee_base = max(0, subtotal - discount - voucher)
+    marketplace_fee = await calculate_marketplace_fee(sales_channel, fee_base, body.get("marketplace_fee"))
+    live_video_fee_pct = nonnegative(body.get("live_video_fee_pct", 0), "Live/Video fee")
+    affiliate_fee_pct = nonnegative(body.get("affiliate_fee_pct", 0), "Affiliate fee")
+    live_video_fee = fee_base * live_video_fee_pct / 100
+    affiliate_fee = fee_base * affiliate_fee_pct / 100
+    marketplace_fixed_fees = await get_marketplace_fixed_fees(sales_channel)
+    return_rate_pct = nonnegative(body.get("return_rate_pct", 0), "Return rate")
+    if return_rate_pct > 100:
+        raise HTTPException(400, "Return rate cannot exceed 100%")
+    return_allowance = marketplace_fixed_fees["return_fee_cap"] * return_rate_pct / 100
+    handling_fee = marketplace_fixed_fees["handling_fee"]
+    logistics_fee = marketplace_fixed_fees["logistics_fee"]
+    other_fee = nonnegative(body.get("other_fee", 0), "Other fee") + live_video_fee + affiliate_fee + handling_fee + logistics_fee + return_allowance
     advertising = float(body.get("advertising_cost", 0))
     total = subtotal - discount - voucher + shipping
     net = total - marketplace_fee - other_fee - advertising - cogs
     body.update({
         "subtotal": subtotal, "cogs": cogs, "discount": discount, "voucher": voucher,
         "shipping": shipping, "marketplace_fee": marketplace_fee, "other_fee": other_fee,
+        "marketplace_fee_base": fee_base, "live_video_fee_pct": live_video_fee_pct,
+        "live_video_fee": live_video_fee, "affiliate_fee_pct": affiliate_fee_pct,
+        "affiliate_fee": affiliate_fee,
+        "handling_fee": handling_fee, "logistics_fee": logistics_fee,
+        "return_rate_pct": return_rate_pct, "return_allowance": return_allowance,
         "advertising_cost": advertising, "total": total, "net_profit": net,
         "payment_status": body.get("payment_status", "paid"),
         "fulfillment_status": body.get("fulfillment_status", "processing"),
-        "sales_channel": body.get("sales_channel", "Direct"),
+        "sales_channel": sales_channel,
         "date": body.get("date") or now_iso(),
         "created_at": now_iso(), "updated_at": now_iso(),
     })
     await db.sales_orders.insert_one(body)
     # financial txn if paid
-    if body["payment_status"] == "paid":
+    if body["payment_status"] == "paid" and not is_marketplace_channel(sales_channel):
         await create_financial_transaction(user, "income", total - marketplace_fee - other_fee, body.get("account_id"), f"Sale {body['order_number']}", "sales_order", body["id"])
     # update customer
     cust_id = body.get("customer_id")
@@ -984,9 +1053,95 @@ async def import_marketplace_orders(body: BulkImportIn, user: dict = Depends(req
         }
         await db.sales_orders.insert_one(so)
         await record_movement("product", p["id"], o.variant_sku, -o.quantity, "sales", before, v["stock"], user["id"], f"Import {onum}")
-        await create_financial_transaction(user, "income", total - float(o.marketplace_fee or 0), await get_default_account_id(), f"Sale {onum} (imported)", "sales_order", sid)
         created += 1
     return {"created": created, "skipped": skipped}
+
+
+# ---------- MARKETPLACE SETTLEMENT ----------
+@api.get("/marketplace/settlements", dependencies=[Depends(require_module("finance"))])
+async def list_settlements():
+    return await db.marketplace_settlements.find({}, {"_id": 0}).sort("settled_at", -1).to_list(500)
+
+
+@api.post("/marketplace/settlements")
+@transactional
+async def create_settlement(body: Dict[str, Any], user: dict = Depends(require_module("finance"))):
+    order_ids = body.get("order_ids") or []
+    if not order_ids:
+        raise HTTPException(400, "At least one marketplace order is required")
+    orders = await db.sales_orders.find({"id": {"$in": order_ids}}, {"_id": 0}).to_list(1000)
+    if len(orders) != len(set(order_ids)):
+        raise HTTPException(400, "One or more sales orders were not found")
+    if any(not is_marketplace_channel(o.get("sales_channel", "")) for o in orders):
+        raise HTTPException(400, "Only marketplace orders can be settled")
+    if any(o.get("settlement_id") for o in orders):
+        raise HTTPException(400, "One or more orders are already settled")
+    gross = sum(float(o.get("total", 0)) for o in orders)
+    recorded_fees = sum(float(o.get("marketplace_fee", 0)) + float(o.get("other_fee", 0)) + float(o.get("advertising_cost", 0)) for o in orders)
+    net_amount = positive(body.get("net_amount", gross - recorded_fees), "Settlement amount")
+    account_id = body.get("account_id") or await get_default_account_id()
+    if not account_id or not await db.accounts.find_one({"id": account_id}):
+        raise HTTPException(400, "Settlement account not found")
+    settlement_id = new_id()
+    settlement = {
+        "id": settlement_id,
+        "settlement_number": body.get("settlement_number") or f"SET-{datetime.now().strftime('%y%m%d')}-{settlement_id[:4].upper()}",
+        "sales_channel": body.get("sales_channel") or orders[0].get("sales_channel"),
+        "order_ids": order_ids, "order_count": len(orders), "gross": gross,
+        "recorded_fees": recorded_fees, "net_amount": net_amount,
+        "account_id": account_id, "settled_at": body.get("settled_at") or now_iso(),
+        "created_at": now_iso(), "user_id": user["id"],
+    }
+    await db.marketplace_settlements.insert_one(settlement)
+    await create_financial_transaction(user, "income", net_amount, account_id, f"Settlement {settlement['settlement_number']}", "marketplace_settlement", settlement_id)
+    await db.sales_orders.update_many({"id": {"$in": order_ids}}, {"$set": {"settlement_id": settlement_id, "settlement_status": "settled", "updated_at": now_iso()}})
+    await audit(user, "create", "marketplace_settlement", settlement_id, None, settlement)
+    settlement.pop("_id", None)
+    return settlement
+
+
+# ---------- RETURNS ----------
+@api.get("/returns", dependencies=[Depends(require_module("sales"))])
+async def list_returns():
+    return await db.returns.find({}, {"_id": 0}).sort("created_at", -1).to_list(500)
+
+
+@api.post("/returns")
+@transactional
+async def create_return(body: Dict[str, Any], user: dict = Depends(require_module("sales"))):
+    sales_order_id = body.get("sales_order_id")
+    sales_order = await db.sales_orders.find_one({"id": sales_order_id})
+    if not sales_order:
+        raise HTTPException(404, "Sales order not found")
+    quantity = positive(body.get("quantity", 0), "Return quantity")
+    item = next((item for item in sales_order.get("items", []) if item.get("variant_sku") == body.get("variant_sku")), None)
+    if not item or quantity > float(item.get("quantity", 0)):
+        raise HTTPException(400, "Return quantity exceeds the sold quantity")
+    existing = await db.returns.find_one({"sales_order_id": sales_order_id, "variant_sku": body.get("variant_sku"), "status": {"$ne": "cancelled"}})
+    returned_before = float(existing.get("quantity", 0)) if existing else 0
+    if returned_before + quantity > float(item.get("quantity", 0)):
+        raise HTTPException(400, "Total returned quantity exceeds the sold quantity")
+    return_id = new_id()
+    return_doc = {"id": return_id, "sales_order_id": sales_order_id, "variant_sku": body.get("variant_sku"), "quantity": quantity,
+                  "condition": body.get("condition", "good"), "reason": body.get("reason", ""), "refund_amount": nonnegative(body.get("refund_amount", 0), "Refund amount"),
+                  "status": "received", "created_at": now_iso(), "user_id": user["id"]}
+    if return_doc["condition"] == "good":
+        product = await db.products.find_one({"id": item["product_id"]})
+        if product:
+            variants = product.get("variants", [])
+            variant = next((variant for variant in variants if variant.get("sku") == item.get("variant_sku")), None)
+            if variant:
+                before = float(variant.get("stock", 0)); variant["stock"] = before + quantity
+                await db.products.update_one({"id": product["id"]}, {"$set": {"variants": variants, "updated_at": now_iso()}})
+                await record_movement("product", product["id"], item["variant_sku"], quantity, "return", before, variant["stock"], user["id"], f"Return {sales_order['order_number']}")
+    await db.returns.insert_one(return_doc)
+    if return_doc["refund_amount"] > 0:
+        prior = await db.financial_transactions.find_one({"ref_type": "sales_order", "ref_id": sales_order_id, "type": "income"})
+        if prior:
+            await create_financial_transaction(user, "expense", return_doc["refund_amount"], prior.get("account_id"), f"Refund {sales_order['order_number']}", "return", return_id)
+    await audit(user, "create", "return", return_id, None, return_doc)
+    return_doc.pop("_id", None)
+    return return_doc
 
 # ---------- ONBOARDING ----------
 class OnboardingIn(BaseModel):
@@ -1108,6 +1263,73 @@ class HPPCalcIn(BaseModel):
     marketplace_fee_pct: Optional[float] = 0
     advertising: Optional[float] = 0
     discount: Optional[float] = 0
+
+
+class DTFCostingIn(BaseModel):
+    design_name: str = ""
+    quantity: float = 1
+    blank_cost: float = 0
+    dtf_transfer_cost: float = 0
+    printing_cost: float = 0
+    labor_cost: float = 0
+    packaging_cost: float = 0
+    design_setup_cost: float = 0
+    reject_rate: float = 0
+    selling_price: float = 0
+
+
+async def calculate_dtf_costing(body: Dict[str, Any], user: Optional[dict] = None):
+    quantity = positive(body.get("quantity", 0), "Quantity")
+    reject_rate = nonnegative(body.get("reject_rate", 0), "Reject rate")
+    if reject_rate > 1:
+        raise HTTPException(400, "Reject rate cannot exceed 100%")
+
+    design_name = (body.get("design_name") or "Custom DTF Design").strip() or "Custom DTF Design"
+    blank_cost = nonnegative(body.get("blank_cost", 0), "Blank cost")
+    dtf_transfer_cost = nonnegative(body.get("dtf_transfer_cost", 0), "DTF transfer cost")
+    printing_cost = nonnegative(body.get("printing_cost", 0), "Printing cost")
+    labor_cost = nonnegative(body.get("labor_cost", 0), "Labor cost")
+    packaging_cost = nonnegative(body.get("packaging_cost", 0), "Packaging cost")
+    design_setup_cost = nonnegative(body.get("design_setup_cost", 0), "Design setup cost")
+    selling_price = nonnegative(body.get("selling_price", 0), "Selling price")
+
+    reject_qty = quantity * reject_rate
+    produced_qty = quantity + reject_qty
+    variable_cost_per_unit = blank_cost + dtf_transfer_cost + printing_cost + labor_cost + packaging_cost
+    total_variable_cost = variable_cost_per_unit * produced_qty
+    total_cost = total_variable_cost + design_setup_cost
+    unit_cost = total_cost / quantity if quantity > 0 else 0
+
+    fallback_suggested_price = max(unit_cost * 1.25, unit_cost + 10000)
+    suggested_price = selling_price if selling_price > 0 else fallback_suggested_price
+    gross_profit = suggested_price - unit_cost
+    margin_percent = (gross_profit / suggested_price * 100) if suggested_price > 0 else 0
+
+    return {
+        "design_name": design_name,
+        "quantity": quantity,
+        "reject_qty": round(reject_qty, 2),
+        "produced_qty": round(produced_qty, 2),
+        "unit_cost": round(unit_cost, 2),
+        "total_cost": round(total_cost, 2),
+        "gross_profit": round(gross_profit, 2),
+        "suggested_price": round(suggested_price, 2),
+        "margin_percent": round(margin_percent, 2),
+        "cost_breakdown": {
+            "blank_cost": round(blank_cost * produced_qty, 2),
+            "dtf_transfer_cost": round(dtf_transfer_cost * produced_qty, 2),
+            "printing_cost": round(printing_cost * produced_qty, 2),
+            "labor_cost": round(labor_cost * produced_qty, 2),
+            "packaging_cost": round(packaging_cost * produced_qty, 2),
+            "design_setup_cost": round(design_setup_cost, 2),
+            "reject_cost": round((blank_cost + dtf_transfer_cost + printing_cost + labor_cost + packaging_cost) * reject_qty, 2),
+        },
+    }
+
+
+@api.post("/dtf/costing", dependencies=[Depends(require_module("production"))])
+async def dtf_costing(body: DTFCostingIn):
+    return await calculate_dtf_costing(body.model_dump())
 
 @api.post("/hpp/calculate", dependencies=[Depends(require_module("dashboard"))])
 async def calc_hpp(body: HPPCalcIn):
@@ -1350,6 +1572,25 @@ async def report_pl(start: str = "", end: str = ""):
     net = gp - op_exp - mp_fees - adv
     return {"revenue": revenue, "cogs": cogs, "gross_profit": gp, "marketplace_fees": mp_fees, "advertising": adv, "operating_expenses": op_exp, "net_profit": net}
 
+
+@api.get("/reports/profit_breakdown", dependencies=[Depends(require_module("reports"))])
+async def profit_breakdown(start: str = "", end: str = ""):
+    query = {}
+    if start: query["date"] = {"$gte": start}
+    if end: query.setdefault("date", {})["$lte"] = end
+    sales = await db.sales_orders.find(query, {"_id": 0}).to_list(10000)
+    by_channel = {}; by_design = {}
+    for sale in sales:
+        channel = sale.get("sales_channel", "Other")
+        channel_row = by_channel.setdefault(channel, {"orders": 0, "revenue": 0, "profit": 0})
+        channel_row["orders"] += 1; channel_row["revenue"] += float(sale.get("total", 0)); channel_row["profit"] += float(sale.get("net_profit", 0))
+        for item in sale.get("items", []):
+            design = item.get("design_name") or item.get("product_name") or item.get("variant_sku", "Unknown")
+            design_row = by_design.setdefault(design, {"quantity": 0, "revenue": 0, "profit": 0})
+            quantity = float(item.get("quantity", 0)); price = float(item.get("selling_price", 0)); cost = float(item.get("cost", 0))
+            design_row["quantity"] += quantity; design_row["revenue"] += quantity * price; design_row["profit"] += quantity * (price - cost)
+    return {"by_channel": [{"channel": key, **value} for key, value in by_channel.items()], "by_design": [{"design": key, **value} for key, value in by_design.items()]}
+
 # ---------- AUDIT LOG ----------
 @api.get("/audit_logs", dependencies=[Depends(require_role("owner"))])
 async def list_audit(limit: int = 200):
@@ -1390,24 +1631,42 @@ async def seed_all():
                 "name": name, "role": role, "created_at": now_iso(),
             })
 
+    required_accounts = [
+        {"name": "Kas Tunai", "kind": "cash", "balance": 0, "is_default": True},
+        {"name": "Bank BCA", "kind": "bank", "balance": 0},
+        {"name": "Blu by BCA Digital", "kind": "bank", "balance": 0},
+        {"name": "SeaBank", "kind": "bank", "balance": 0},
+        {"name": "BRI", "kind": "bank", "balance": 0},
+        {"name": "E-Wallet DANA", "kind": "wallet", "balance": 0},
+        {"name": "GoPay", "kind": "wallet", "balance": 0},
+        {"name": "Hutang", "kind": "liability", "balance": 0},
+        {"name": "Shopee Balance", "kind": "marketplace", "balance": 0},
+    ]
+    account_index = {}
+    for account in required_accounts:
+        existing = await db.accounts.find_one({"name": account["name"]})
+        if existing is None:
+            doc = {"id": new_id(), **account, "created_at": now_iso()}
+            await db.accounts.insert_one(doc)
+            existing = doc
+        account_index[account["name"]] = existing
+    cash_id = account_index["Kas Tunai"]["id"]
+
+    await db.marketplaces.update_one({"name": "TikTok Shop"}, {"$set": {
+        "admin_fee_pct": 8, "service_fee_pct": 4, "payment_fee_pct": 0,
+        "handling_fee": 1250, "commission_cap": 650000, "return_fee_cap": 5000,
+    }})
+
     # Only seed demo data once
     if await db.products.count_documents({}) > 0:
         return
 
     logger.info("Seeding demo data...")
 
-    # accounts
-    cash_id = new_id(); bank_id = new_id(); mp_id = new_id()
-    await db.accounts.insert_many([
-        {"id": cash_id, "name": "Kas Tunai", "kind": "cash", "balance": 0, "is_default": True, "created_at": now_iso()},
-        {"id": bank_id, "name": "Bank BCA", "kind": "bank", "balance": 0, "created_at": now_iso()},
-        {"id": mp_id, "name": "Shopee Balance", "kind": "marketplace", "balance": 0, "created_at": now_iso()},
-    ])
-
     # marketplaces
     await db.marketplaces.insert_many([
         {"id": new_id(), "name": "Shopee", "admin_fee_pct": 4.25, "service_fee_pct": 4.5, "payment_fee_pct": 1.5, "advertising_fee_pct": 0, "created_at": now_iso()},
-        {"id": new_id(), "name": "TikTok Shop", "admin_fee_pct": 4.5, "service_fee_pct": 3.5, "payment_fee_pct": 1.5, "advertising_fee_pct": 0, "created_at": now_iso()},
+        {"id": new_id(), "name": "TikTok Shop", "admin_fee_pct": 8, "service_fee_pct": 4, "payment_fee_pct": 0, "handling_fee": 1250, "logistics_fee": 0, "commission_cap": 650000, "return_fee_cap": 5000, "advertising_fee_pct": 0, "created_at": now_iso()},
         {"id": new_id(), "name": "WhatsApp", "admin_fee_pct": 0, "service_fee_pct": 0, "payment_fee_pct": 0, "advertising_fee_pct": 0, "created_at": now_iso()},
         {"id": new_id(), "name": "Direct/Offline", "admin_fee_pct": 0, "service_fee_pct": 0, "payment_fee_pct": 0, "advertising_fee_pct": 0, "created_at": now_iso()},
     ])

@@ -54,7 +54,7 @@ export function Sales() {
 function SalesForm({ products, customers, marketplaces, onClose, onDone }) {
   const [form, setForm] = useState({
     customer_id:"", customer_name:"", sales_channel:"Direct/Offline", items:[],
-    discount:0, voucher:0, shipping:0, other_fee:0, advertising_cost:0,
+    discount:0, voucher:0, shipping:0, other_fee:0, advertising_cost:0, live_video_fee_pct:0, affiliate_fee_pct:0, return_rate_pct:0,
     payment_status:"paid", fulfillment_status:"processing", date:new Date().toISOString(),
   });
   const [row, setRow] = useState({ product_id:"", variant_sku:"", quantity:1, selling_price:0 });
@@ -74,7 +74,11 @@ function SalesForm({ products, customers, marketplaces, onClose, onDone }) {
   const mp = marketplaces.find(m=>m.name===form.sales_channel);
   const mpFeePct = mp ? Number(mp.admin_fee_pct||0)+Number(mp.service_fee_pct||0)+Number(mp.payment_fee_pct||0) : 0;
   const subtotal = form.items.reduce((s,i)=>s+i.quantity*i.selling_price,0);
-  const mpFee = subtotal * mpFeePct / 100;
+  const feeBase = Math.max(0, subtotal - Number(form.discount) - Number(form.voucher));
+  const mpFee = feeBase * mpFeePct / 100;
+  const handlingFee = Number(mp?.handling_fee || 0);
+  const logisticsFee = Number(mp?.logistics_fee || 0);
+  const returnAllowance = Number(mp?.return_fee_cap || 0) * Number(form.return_rate_pct) / 100;
   const total = subtotal - Number(form.discount) - Number(form.voucher) + Number(form.shipping);
 
   const submit = async () => {
@@ -82,7 +86,7 @@ function SalesForm({ products, customers, marketplaces, onClose, onDone }) {
     try {
       const cust = customers.find(c=>c.id===form.customer_id);
       await api.post("/sales_orders", {
-        ...form, marketplace_fee: mpFee,
+        ...form,
         customer_name: cust?.name || form.customer_name || "Guest",
       });
       toast.success("Order dibuat & stok berkurang");
@@ -142,6 +146,9 @@ function SalesForm({ products, customers, marketplaces, onClose, onDone }) {
         <Field label="Voucher"><Input type="number" value={form.voucher} onChange={e=>setForm({...form,voucher:e.target.value})}/></Field>
         <Field label="Shipping"><Input type="number" value={form.shipping} onChange={e=>setForm({...form,shipping:e.target.value})}/></Field>
         <Field label="Advertising"><Input type="number" value={form.advertising_cost} onChange={e=>setForm({...form,advertising_cost:e.target.value})}/></Field>
+        <Field label="Live / Video Fee %"><Input type="number" step="0.01" value={form.live_video_fee_pct} onChange={e=>setForm({...form,live_video_fee_pct:e.target.value})}/></Field>
+        <Field label="Affiliate Fee %"><Input type="number" step="0.01" value={form.affiliate_fee_pct} onChange={e=>setForm({...form,affiliate_fee_pct:e.target.value})}/></Field>
+        <Field label="Return Rate %"><Input type="number" step="0.01" value={form.return_rate_pct} onChange={e=>setForm({...form,return_rate_pct:e.target.value})}/></Field>
         <Field label="Payment">
           <Select value={form.payment_status} onChange={e=>setForm({...form,payment_status:e.target.value})}>
             <option value="paid">Paid</option><option value="unpaid">Unpaid</option>
@@ -156,7 +163,11 @@ function SalesForm({ products, customers, marketplaces, onClose, onDone }) {
 
       <div className="mt-4 pt-4 border-t border-border space-y-1 text-sm">
         <div className="flex justify-between"><span className="text-muted-foreground">Subtotal</span><span>{fmtIDR(subtotal)}</span></div>
-        <div className="flex justify-between"><span className="text-muted-foreground">Marketplace Fee ({mpFeePct}%)</span><span className="text-rose-600">-{fmtIDR(mpFee)}</span></div>
+        <div className="flex justify-between"><span className="text-muted-foreground">Fee Shopee ({mpFeePct}% setelah diskon)</span><span className="text-rose-600">-{fmtIDR(mpFee)}</span></div>
+        <div className="flex justify-between"><span className="text-muted-foreground">Live/Video + Affiliate</span><span className="text-rose-600">-{fmtIDR(feeBase * (Number(form.live_video_fee_pct) + Number(form.affiliate_fee_pct)) / 100)}</span></div>
+        {handlingFee > 0 && <div className="flex justify-between"><span className="text-muted-foreground">Handling Fee</span><span className="text-rose-600">-{fmtIDR(handlingFee)}</span></div>}
+        {logisticsFee > 0 && <div className="flex justify-between"><span className="text-muted-foreground">Logistics Fee</span><span className="text-rose-600">-{fmtIDR(logisticsFee)}</span></div>}
+        {returnAllowance > 0 && <div className="flex justify-between"><span className="text-muted-foreground">Return Allowance</span><span className="text-rose-600">-{fmtIDR(returnAllowance)}</span></div>}
         <div className="flex justify-between font-bold text-lg font-display"><span>Total</span><span>{fmtIDR(total)}</span></div>
       </div>
       <div className="flex justify-end gap-2 mt-4">
@@ -286,4 +297,58 @@ export function Finance() {
       {attachment && <Modal open onClose={()=>setAttachment(null)} title="Upload Lampiran"><div className="space-y-3"><Field label="File"><Input type="file" onChange={e=>setAttachment({...attachment,file:e.target.files?.[0]})}/></Field><div className="text-xs text-muted-foreground">File disimpan di D:/RdCloth pada komputer backend.</div></div><div className="flex justify-end gap-2 mt-6"><Button variant="outline" onClick={()=>setAttachment(null)}>Batal</Button><Button onClick={uploadAttachment}>Upload</Button></div></Modal>}
     </div>
   );
+}
+
+export function MarketplaceSettlement() {
+  const [rows, setRows] = useState([]);
+  const [orders, setOrders] = useState([]);
+  const [form, setForm] = useState({ order_ids: [], account_id: "", net_amount: "" });
+  const { rows: accounts } = useCRUD("accounts");
+  const reload = async () => {
+    const [settlements, sales] = await Promise.all([api.get("/marketplace/settlements"), api.get("/sales_orders")]);
+    setRows(settlements.data); setOrders(sales.data.filter(o=>["Shopee","TikTok Shop"].includes(o.sales_channel) && !o.settlement_id));
+  };
+  useEffect(() => { reload(); }, []);
+  const selected = orders.filter(o=>form.order_ids.includes(o.id));
+  const suggested = selected.reduce((sum, order)=>sum + Number(order.total||0) - Number(order.marketplace_fee||0) - Number(order.other_fee||0) - Number(order.advertising_cost||0), 0);
+  const submit = async () => {
+    if (!form.order_ids.length) { toast.error("Pilih minimal satu order"); return; }
+    try { await api.post("/marketplace/settlements", { ...form, net_amount:Number(form.net_amount||suggested) }); toast.success("Settlement dicatat dan dana masuk ke akun"); setForm({order_ids:[],account_id:"",net_amount:""}); reload(); }
+    catch (e) { toast.error(formatErr(e.response?.data?.detail)); }
+  };
+  return <div>
+    <PageHeader title="Marketplace Settlement" subtitle="Catat dana Shopee dan TikTok Shop yang sudah dicairkan"/>
+    <div className="grid lg:grid-cols-[1fr_360px] gap-4">
+      <DataTable testid="settlement-orders" rows={orders} columns={[
+        {header:"Order",cell:r=><span className="font-mono text-xs">{r.order_number}</span>},
+        {header:"Channel",cell:r=>r.sales_channel}, {header:"Gross",cell:r=>fmtIDR(r.total)},
+        {header:"Net Est.",cell:r=>fmtIDR(Number(r.total||0)-Number(r.marketplace_fee||0)-Number(r.other_fee||0)-Number(r.advertising_cost||0))},
+        {header:"Select",cell:r=><input type="checkbox" checked={form.order_ids.includes(r.id)} onChange={e=>setForm(f=>({...f,order_ids:e.target.checked?[...f.order_ids,r.id]:f.order_ids.filter(id=>id!==r.id)}))}/>}]} />
+      <div className="p-5 rounded-lg border border-border bg-card space-y-3 h-fit">
+        <Field label="Masuk ke akun"><Select value={form.account_id} onChange={e=>setForm({...form,account_id:e.target.value})}><option value="">-- Akun --</option>{accounts.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}</Select></Field>
+        <Field label="Dana cair (opsional)"><Input type="number" value={form.net_amount||suggested} onChange={e=>setForm({...form,net_amount:e.target.value})}/></Field>
+        <div className="text-sm text-muted-foreground">Order dipilih: {selected.length}<br/>Estimasi dana: <b>{fmtIDR(suggested)}</b></div>
+        <Button onClick={submit} className="w-full">Catat Dana Cair</Button>
+      </div>
+    </div>
+    <div className="mt-8"><h3 className="font-display font-bold text-lg mb-3">Riwayat Settlement</h3><DataTable rows={rows} columns={[{header:"Settlement",cell:r=><span className="font-mono text-xs">{r.settlement_number}</span>},{header:"Channel",cell:r=>r.sales_channel},{header:"Orders",cell:r=>r.order_count},{header:"Net",cell:r=><b>{fmtIDR(r.net_amount)}</b>},{header:"Status",cell:()=> <StatusPill status="paid"/>}]} /></div>
+  </div>;
+}
+
+export function Returns() {
+  const [orders, setOrders] = useState([]);
+  const [form, setForm] = useState({ sales_order_id:"", variant_sku:"", quantity:1, condition:"good", refund_amount:0, reason:"" });
+  const reload = () => api.get("/sales_orders").then(r=>setOrders(r.data));
+  useEffect(() => { reload(); }, []);
+  const order = orders.find(o=>o.id===form.sales_order_id);
+  const submit = async () => { try { await api.post("/returns", {...form, quantity:Number(form.quantity), refund_amount:Number(form.refund_amount)}); toast.success("Retur dicatat"); setForm({sales_order_id:"",variant_sku:"",quantity:1,condition:"good",refund_amount:0,reason:""}); reload(); } catch (e) { toast.error(formatErr(e.response?.data?.detail)); } };
+  return <div>
+    <PageHeader title="Returns & Refunds" subtitle="Kelola barang retur, kondisi barang, dan pengembalian dana"/>
+    <div className="max-w-2xl p-6 rounded-lg border border-border bg-card space-y-4">
+      <Field label="Sales Order"><Select value={form.sales_order_id} onChange={e=>setForm({...form,sales_order_id:e.target.value,variant_sku:""})}><option value="">-- Pilih order --</option>{orders.map(o=><option key={o.id} value={o.id}>{o.order_number} · {o.sales_channel}</option>)}</Select></Field>
+      <Field label="Variant"><Select value={form.variant_sku} onChange={e=>setForm({...form,variant_sku:e.target.value})}><option value="">-- Pilih variant --</option>{(order?.items||[]).map(i=><option key={i.variant_sku} value={i.variant_sku}>{i.variant_sku} · {i.quantity} pcs</option>)}</Select></Field>
+      <div className="grid grid-cols-2 gap-3"><Field label="Quantity"><Input type="number" value={form.quantity} onChange={e=>setForm({...form,quantity:e.target.value})}/></Field><Field label="Refund"><Input type="number" value={form.refund_amount} onChange={e=>setForm({...form,refund_amount:e.target.value})}/></Field><Field label="Condition"><Select value={form.condition} onChange={e=>setForm({...form,condition:e.target.value})}><option value="good">Good - kembali ke stok</option><option value="damaged">Damaged - tidak masuk stok</option></Select></Field><Field label="Reason"><Input value={form.reason} onChange={e=>setForm({...form,reason:e.target.value})}/></Field></div>
+      <Button onClick={submit}>Simpan Retur</Button>
+    </div>
+  </div>;
 }
