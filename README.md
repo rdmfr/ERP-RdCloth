@@ -12,6 +12,8 @@ Self-hosted ERP template untuk UMKM dan small businesses di Indonesia maupun pas
 - **Pembelian (Purchase Orders)**: Order pembelian bahan baku ke supplier dan konfirmasi penerimaan stok.
 - **Pesanan Penjualan (Sales Orders)**: Pencatatan transaksi penjualan, pengiriman barang, dan kalkulasi piutang.
 - **Keuangan & Transaksi**: Pencatatan arus kas (pemasukan & pengeluaran) dan jurnal aktivitas operasional.
+- **Finance Suite**: Buku besar, jurnal umum, faktur, AP/AR, rekonsiliasi bank, laporan dasar, dan ringkasan pajak.
+- **Light CRM**: Segmen customer, nilai pelanggan, catatan interaksi, task, dan follow-up.
 
 ## Why NexaBiz
 

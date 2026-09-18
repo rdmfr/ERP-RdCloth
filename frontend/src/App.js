@@ -13,6 +13,8 @@ import { Sales, Finance, MarketplaceSettlement, Returns } from "@/pages/Transact
 import { HPPCalculator, PricingSimulator, BEPCalculator, Reports, DTFCosting } from "@/pages/Calculators";
 import Settings from "@/pages/Settings";
 import MarketplaceImport from "@/pages/MarketplaceImport";
+import FinanceSuite from "@/pages/FinanceSuite";
+import CRM from "@/pages/CRM";
 import OnboardingWizard, { useOnboardingStatus } from "@/pages/OnboardingWizard";
 import "@/index.css";
 
@@ -40,6 +42,8 @@ function AppRoutes() {
       <Route path="/suppliers" element={<Shell module="suppliers"><Suppliers/></Shell>}/>
       <Route path="/customers" element={<Shell module="customers"><Customers/></Shell>}/>
       <Route path="/finance" element={<Shell module="finance"><Finance/></Shell>}/>
+      <Route path="/finance-suite" element={<Shell module="finance"><FinanceSuite/></Shell>}/>
+      <Route path="/crm" element={<Shell module="crm"><CRM/></Shell>}/>
       <Route path="/settlements" element={<Shell module="finance"><MarketplaceSettlement/></Shell>}/>
       <Route path="/returns" element={<Shell module="sales"><Returns/></Shell>}/>
       <Route path="/marketplace-settings" element={<Shell module="finance"><MarketplaceSettings/></Shell>}/>

@@ -229,9 +229,9 @@ async def get_current_user(request: Request) -> dict:
 # Role-based permissions
 ROLE_MODULES = {
     "owner": {"*"},
-    "admin": {"sales", "orders", "products", "inventory", "customers", "suppliers", "dashboard", "materials"},
+    "admin": {"sales", "orders", "products", "inventory", "customers", "suppliers", "dashboard", "materials", "crm"},
     "production": {"production", "inventory", "products", "materials", "dashboard"},
-    "finance": {"finance", "reports", "purchasing", "sales", "dashboard", "expenses", "assets"},
+    "finance": {"finance", "reports", "purchasing", "sales", "dashboard", "expenses", "assets", "crm"},
 }
 
 def require_module(module: str):
@@ -426,6 +426,9 @@ collection_crud("marketplaces", "finance")
 collection_crud("accounts", "finance")
 collection_crud("assets", "assets")
 collection_crud("settings_kv", "dashboard")
+collection_crud("invoices", "finance")
+collection_crud("bills", "finance")
+collection_crud("crm_activities", "crm")
 
 # ---------- PRODUCTS (with variants) ----------
 @api.get("/products", dependencies=[Depends(require_module("products"))])
@@ -968,6 +971,103 @@ class FinTxnIn(BaseModel):
 async def create_txn(body: FinTxnIn, user: dict = Depends(require_module("finance"))):
     await create_financial_transaction(user, body.type, body.amount, body.account_id, body.description, "manual", "")
     return {"ok": True}
+
+# ---------- FINANCE SUITE ----------
+class JournalLine(BaseModel):
+    account_id: str
+    description: str = ""
+    debit: float = 0
+    credit: float = 0
+
+class JournalEntryIn(BaseModel):
+    date: Optional[str] = None
+    reference: str = ""
+    description: str
+    lines: List[JournalLine]
+
+@api.get("/finance/journal_entries")
+async def list_journal_entries(user: dict = Depends(require_module("finance"))):
+    return await db.journal_entries.find({}, {"_id": 0}).sort("date", -1).to_list(1000)
+
+@api.post("/finance/journal_entries")
+@transactional
+async def create_journal_entry(body: JournalEntryIn, user: dict = Depends(require_module("finance"))):
+    if len(body.lines) < 2:
+        raise HTTPException(400, "A journal entry needs at least two lines")
+    debit = sum(nonnegative(line.debit, "Debit") for line in body.lines)
+    credit = sum(nonnegative(line.credit, "Credit") for line in body.lines)
+    if abs(debit - credit) > 0.005:
+        raise HTTPException(400, "Debits and credits must balance")
+    if any((line.debit > 0 and line.credit > 0) or (line.debit == 0 and line.credit == 0) for line in body.lines):
+        raise HTTPException(400, "Each journal line must have either debit or credit")
+    for line in body.lines:
+        if not await db.accounts.find_one({"id": line.account_id}):
+            raise HTTPException(400, f"Account {line.account_id} not found")
+    entry = {"id": new_id(), "date": body.date or now_iso(), "reference": body.reference,
+             "description": body.description, "lines": [line.model_dump() for line in body.lines],
+             "total": debit, "created_by": user["id"], "created_at": now_iso()}
+    await db.journal_entries.insert_one(entry)
+    await audit(user, "create", "journal_entry", entry["id"], None, entry)
+    entry.pop("_id", None)
+    return entry
+
+@api.get("/finance/ap-ar")
+async def list_ap_ar(user: dict = Depends(require_module("finance"))):
+    invoices = await db.invoices.find({}, {"_id": 0}).sort("due_date", 1).to_list(1000)
+    bills = await db.bills.find({}, {"_id": 0}).sort("due_date", 1).to_list(1000)
+    return {"receivables": invoices, "payables": bills,
+            "receivables_total": sum(float(x.get("amount", 0)) - float(x.get("paid_amount", 0)) for x in invoices if x.get("status") != "cancelled"),
+            "payables_total": sum(float(x.get("amount", 0)) - float(x.get("paid_amount", 0)) for x in bills if x.get("status") != "cancelled")}
+
+@api.post("/finance/invoices/{item_id}/payment")
+@transactional
+async def pay_invoice(item_id: str, body: Dict[str, Any], user: dict = Depends(require_module("finance"))):
+    invoice = await db.invoices.find_one({"id": item_id})
+    if not invoice:
+        raise HTTPException(404, "Invoice not found")
+    amount = positive(body.get("amount", 0), "Payment amount")
+    outstanding = float(invoice.get("amount", 0)) - float(invoice.get("paid_amount", 0))
+    if amount > outstanding:
+        raise HTTPException(400, "Payment exceeds outstanding amount")
+    paid = float(invoice.get("paid_amount", 0)) + amount
+    status_value = "paid" if paid >= float(invoice.get("amount", 0)) else "partial"
+    await db.invoices.update_one({"id": item_id}, {"$set": {"paid_amount": paid, "status": status_value, "updated_at": now_iso()}})
+    await create_financial_transaction(user, "income", amount, body.get("account_id"), f"Invoice {invoice.get('number', item_id)}", "invoice_payment", item_id)
+    return {"ok": True, "paid_amount": paid, "status": status_value}
+
+@api.post("/finance/bills/{item_id}/payment")
+@transactional
+async def pay_bill(item_id: str, body: Dict[str, Any], user: dict = Depends(require_module("finance"))):
+    bill = await db.bills.find_one({"id": item_id})
+    if not bill:
+        raise HTTPException(404, "Bill not found")
+    amount = positive(body.get("amount", 0), "Payment amount")
+    outstanding = float(bill.get("amount", 0)) - float(bill.get("paid_amount", 0))
+    if amount > outstanding:
+        raise HTTPException(400, "Payment exceeds outstanding amount")
+    paid = float(bill.get("paid_amount", 0)) + amount
+    status_value = "paid" if paid >= float(bill.get("amount", 0)) else "partial"
+    await db.bills.update_one({"id": item_id}, {"$set": {"paid_amount": paid, "status": status_value, "updated_at": now_iso()}})
+    await create_financial_transaction(user, "expense", amount, body.get("account_id"), f"Bill {bill.get('number', item_id)}", "bill_payment", item_id)
+    return {"ok": True, "paid_amount": paid, "status": status_value}
+
+@api.get("/finance/tax-summary")
+async def tax_summary(start: str = "", end: str = "", user: dict = Depends(require_module("finance"))):
+    query = {}
+    if start: query["date"] = {"$gte": start}
+    if end: query.setdefault("date", {})["$lte"] = end
+    sales = await db.sales_orders.find(query, {"_id": 0}).to_list(10000)
+    purchases = await db.purchase_orders.find(query, {"_id": 0}).to_list(10000)
+    output = sum(float(x.get("tax", 0)) for x in sales)
+    input_tax = sum(float(x.get("tax", 0)) for x in purchases)
+    return {"output_tax": output, "input_tax": input_tax, "net_tax": output - input_tax, "period_start": start, "period_end": end}
+
+@api.get("/crm/summary")
+async def crm_summary(user: dict = Depends(require_module("crm"))):
+    customers = await db.customers.find({"status": {"$ne": "archived"}}, {"_id": 0}).to_list(1000)
+    activities = await db.crm_activities.find({}, {"_id": 0}).sort("due_date", 1).to_list(1000)
+    return {"customers": customers, "activities": activities,
+            "total_customers": len(customers), "open_followups": len([x for x in activities if x.get("status") != "completed"])}
 
 # ---------- EXPENSES ----------
 @api.get("/expenses", dependencies=[Depends(require_module("finance"))])

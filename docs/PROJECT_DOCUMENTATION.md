@@ -144,6 +144,20 @@ Reports menyediakan:
 - Profit and Loss CSV
 - Print/PDF melalui dialog print browser
 
+### Finance Suite
+
+Finance Suite menambahkan buku besar dan jurnal umum dengan validasi debit-kredit
+seimbang, faktur penjualan, vendor bills, ringkasan hutang/piutang, pencatatan
+pembayaran, rekonsiliasi saldo rekening, ringkasan pajak input/output, dan laporan
+keuangan dasar. Endpoint utama tersedia di `/api/finance/journal_entries`,
+`/api/finance/ap-ar`, `/api/finance/reconcile`, dan `/api/finance/tax-summary`.
+
+### Light CRM
+
+Light CRM memakai customer master yang sudah ada dan menambahkan aktivitas berupa note,
+call, task, serta follow-up. Aktivitas tersimpan di `crm_activities` dan dapat dikaitkan
+dengan customer melalui `customer_id`. Modul tersedia pada route `/crm`.
+
 ### Pricing and BEP
 
 - HPP Calculator menghitung komponen biaya, fee marketplace, advertising, margin, dan health margin.

@@ -22,6 +22,8 @@ const NAV = [
   { to: "/suppliers", label: "Suppliers", icon: HardHat, module: "suppliers" },
   { to: "/customers", label: "Customers", icon: Users, module: "customers" },
   { to: "/finance", label: "Finance", icon: Wallet, module: "finance" },
+  { to: "/finance-suite", label: "Finance Suite", icon: Wallet, module: "finance" },
+  { to: "/crm", label: "Light CRM", icon: Users, module: "crm" },
   { to: "/settlements", label: "Settlements", icon: Wallet, module: "finance" },
   { to: "/returns", label: "Returns", icon: ClipboardList, module: "sales" },
   { to: "/marketplace-settings", label: "Marketplace Fees", icon: Settings, module: "finance" },
