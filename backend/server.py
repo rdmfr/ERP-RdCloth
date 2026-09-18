@@ -29,8 +29,11 @@ DB_NAME = os.environ['DB_NAME']
 JWT_SECRET = os.environ['JWT_SECRET']
 JWT_ALG = "HS256"
 ENVIRONMENT = os.environ.get("ENVIRONMENT", "development").lower()
+DEMO_MODE = os.environ.get("DEMO_MODE", "false").lower() in ("1", "true", "yes")
 if ENVIRONMENT == "production" and len(JWT_SECRET) < 32:
     raise RuntimeError("JWT_SECRET must contain at least 32 characters in production")
+if ENVIRONMENT == "production" and DEMO_MODE:
+    raise RuntimeError("DEMO_MODE must be disabled in production")
 
 use_mock = os.environ.get("USE_MOCK_DB", "").lower() in ("1", "true", "yes")
 if not use_mock:
@@ -265,6 +268,9 @@ async def upload_attachment(
     suffix = Path(original_name).suffix.lower()
     if suffix not in {".pdf", ".png", ".jpg", ".jpeg", ".webp", ".csv", ".xlsx", ".doc", ".docx"}:
         raise HTTPException(400, "Unsupported attachment type")
+    max_size = int(os.environ.get("MAX_ATTACHMENT_SIZE_MB", "10")) * 1024 * 1024
+    if file.size and file.size > max_size:
+        raise HTTPException(413, "Attachment exceeds the configured size limit")
     attachment_id = new_id()
     stored_name = f"{attachment_id}{suffix}"
     target = ATTACHMENTS_DIR / stored_name
@@ -303,7 +309,7 @@ async def login(body: LoginIn, response: Response, request: Request):
     except Exception:
         user = None
 
-    if not user and ENVIRONMENT != "production":
+    if not user and ENVIRONMENT != "production" and DEMO_MODE:
         user = FALLBACK_USERS.get(email)
 
     if not user or not verify_password(body.password, user["password_hash"]):
@@ -1020,6 +1026,58 @@ async def cancel_sale(sid: str, user: dict = Depends(require_module("sales"))):
     await audit(user, "cancel", "sales_order", sid, so, None)
     return {"ok": True}
 
+@api.put("/sales_orders/{sid}")
+@transactional
+async def update_sale(sid: str, body: Dict[str, Any], user: dict = Depends(require_module("sales"))):
+    so = await db.sales_orders.find_one({"id": sid})
+    if not so:
+        raise HTTPException(404, "Order not found")
+    if so.get("fulfillment_status") in {"completed", "shipped", "cancelled"} or so.get("settlement_id"):
+        raise HTTPException(409, "Only open, unsettled sales orders can be edited")
+    allowed = {"customer_name", "sales_channel", "discount", "voucher", "shipping", "other_fee", "advertising_cost",
+               "live_video_fee_pct", "affiliate_fee_pct", "return_rate_pct", "payment_status", "fulfillment_status", "date"}
+    if "items" in body or "customer_id" in body:
+        raise HTTPException(400, "Item and customer changes require cancellation and a new order")
+    changes = {key: value for key, value in body.items() if key in allowed}
+    updated = {**so, **changes}
+    subtotal = sum(float(item.get("quantity", 0)) * float(item.get("selling_price", 0)) for item in so.get("items", []))
+    discount = nonnegative(updated.get("discount", 0), "Discount")
+    voucher = nonnegative(updated.get("voucher", 0), "Voucher")
+    shipping = nonnegative(updated.get("shipping", 0), "Shipping")
+    fee_base = max(0, subtotal - discount - voucher)
+    marketplace_fee = await calculate_marketplace_fee(updated.get("sales_channel", "Direct/Offline"), fee_base, updated.get("marketplace_fee"))
+    other_fee = nonnegative(updated.get("other_fee", 0), "Other fee")
+    advertising = nonnegative(updated.get("advertising_cost", 0), "Advertising cost")
+    total = subtotal - discount - voucher + shipping
+    updated.update({"subtotal": subtotal, "discount": discount, "voucher": voucher, "shipping": shipping,
+                    "marketplace_fee": marketplace_fee, "other_fee": other_fee, "advertising_cost": advertising,
+                    "total": total, "net_profit": total - marketplace_fee - other_fee - advertising - float(so.get("cogs", 0)),
+                    "updated_at": now_iso()})
+    await db.sales_orders.update_one({"id": sid}, {"$set": {key: value for key, value in updated.items() if key != "_id"}})
+    await audit(user, "update", "sales_order", sid, so, updated)
+    updated.pop("_id", None)
+    return updated
+
+@api.post("/sales_orders/{sid}/refund")
+@transactional
+async def refund_sale(sid: str, body: Dict[str, Any], user: dict = Depends(require_module("sales"))):
+    so = await db.sales_orders.find_one({"id": sid})
+    if not so:
+        raise HTTPException(404, "Order not found")
+    if so.get("fulfillment_status") == "cancelled":
+        raise HTTPException(400, "Order already cancelled")
+    if await db.financial_transactions.find_one({"ref_type": "sales_refund", "ref_id": sid}):
+        raise HTTPException(409, "Order already refunded")
+    amount = positive(body.get("amount", so.get("total", 0)), "Refund amount")
+    if amount > float(so.get("total", 0)):
+        raise HTTPException(400, "Refund cannot exceed order total")
+    prior = await db.financial_transactions.find_one({"ref_type": "sales_order", "ref_id": sid, "type": "income"})
+    if prior:
+        await create_financial_transaction(user, "expense", amount, prior.get("account_id"), f"Refund {so['order_number']}", "sales_refund", sid)
+    await db.sales_orders.update_one({"id": sid}, {"$set": {"payment_status": "refunded" if amount >= float(so.get("total", 0)) else "partially_refunded", "refund_amount": amount, "updated_at": now_iso()}})
+    await audit(user, "refund", "sales_order", sid, so, {"amount": amount})
+    return {"ok": True, "amount": amount}
+
 # ---------- MARKETPLACE ORDER IMPORT ----------
 class ImportOrderIn(BaseModel):
     order_number: Optional[str] = None
@@ -1180,6 +1238,11 @@ class OnboardingIn(BaseModel):
     business_name: str
     currency: str = "USD"
     locale: str = "en-US"
+    timezone: str = "UTC"
+    tax_enabled: bool = False
+    tax_name: str = "Tax"
+    tax_rate: float = 0
+    tax_inclusive: bool = False
     initial_capital: float = 0
     account_name: str = "Kas Tunai"
 
@@ -1189,7 +1252,7 @@ async def complete_onboarding(body: OnboardingIn, user: dict = Depends(require_r
     # save business profile
     await db.settings_kv.update_one(
         {"id": "business_profile"},
-        {"$set": {"id": "business_profile", "business_name": body.business_name, "currency": body.currency, "locale": body.locale, "setup_complete": True, "updated_at": now_iso()}},
+        {"$set": {"id": "business_profile", **body.model_dump(exclude={"initial_capital", "account_name"}), "setup_complete": True, "updated_at": now_iso()}},
         upsert=True,
     )
     # if capital > 0, seed as owner_investment
@@ -1208,6 +1271,20 @@ async def complete_onboarding(body: OnboardingIn, user: dict = Depends(require_r
 async def onboarding_status(user: dict = Depends(get_current_user)):
     doc = await db.settings_kv.find_one({"id": "business_profile"}, {"_id": 0})
     return {"setup_complete": bool(doc and doc.get("setup_complete")), "profile": doc or {}}
+
+@api.get("/settings/business-profile")
+async def get_business_profile(user: dict = Depends(get_current_user)):
+    doc = await db.settings_kv.find_one({"id": "business_profile"}, {"_id": 0})
+    return doc or {"business_name": "NexaBiz Business", "currency": "USD", "locale": "en-US", "timezone": "UTC", "tax_enabled": False, "tax_name": "Tax", "tax_rate": 0, "tax_inclusive": False}
+
+@api.put("/settings/business-profile")
+@transactional
+async def update_business_profile(body: OnboardingIn, user: dict = Depends(require_role("owner"))):
+    existing = await db.settings_kv.find_one({"id": "business_profile"}, {"_id": 0})
+    profile = {"id": "business_profile", **body.model_dump(exclude={"initial_capital", "account_name"}), "setup_complete": True, "updated_at": now_iso()}
+    await db.settings_kv.update_one({"id": "business_profile"}, {"$set": profile}, upsert=True)
+    await audit(user, "update", "business_profile", "business_profile", existing, profile)
+    return profile
 
 # ---------- REPORT EXPORT ----------
 def to_csv(rows: List[Dict], columns: List[str]) -> str:
@@ -1652,17 +1729,17 @@ async def seed_all():
         if not verify_password(admin_password, existing["password_hash"]):
             await db.users.update_one({"email": admin_email}, {"$set": {"password_hash": hash_password(admin_password)}})
 
-    # test users
-    for email, pwd, name, role in [
-        ("admin@example.com", "admin123", "Admin Staff", "admin"),
-        ("production@example.com", "production123", "Production Staff", "production"),
-        ("finance@example.com", "finance123", "Finance Staff", "finance"),
-    ]:
-        if not await db.users.find_one({"email": email}):
-            await db.users.insert_one({
-                "id": new_id(), "email": email, "password_hash": hash_password(pwd),
-                "name": name, "role": role, "created_at": now_iso(),
-            })
+    if DEMO_MODE:
+        for email, pwd, name, role in [
+            ("admin@example.com", "admin123", "Admin Staff", "admin"),
+            ("production@example.com", "production123", "Production Staff", "production"),
+            ("finance@example.com", "finance123", "Finance Staff", "finance"),
+        ]:
+            if not await db.users.find_one({"email": email}):
+                await db.users.insert_one({
+                    "id": new_id(), "email": email, "password_hash": hash_password(pwd),
+                    "name": name, "role": role, "created_at": now_iso(),
+                })
 
     required_accounts = [
         {"name": "Kas Tunai", "kind": "cash", "balance": 0, "is_default": True},
@@ -1857,7 +1934,7 @@ async def seed_all():
 @app.on_event("startup")
 async def _startup():
     # Allow skipping demo data seeding when MongoDB isn't available or during quick dev runs
-    if os.environ.get("SKIP_DEMO_SEED", "").lower() in ("1", "true", "yes"):
+    if os.environ.get("SKIP_DEMO_SEED", "").lower() in ("1", "true", "yes") or not DEMO_MODE:
         logger.info("SKIP_DEMO_SEED is set; skipping demo data seeding on startup")
         return
     try:

@@ -166,7 +166,7 @@ API menggunakan prefix `/api` dan autentikasi Bearer token atau cookie `access_t
 | Inventory      | `GET /api/inventory/movements`, `POST /api/inventory/products/adjust`, `POST /api/inventory/materials/adjust` |
 | Purchasing     | `/api/purchase_orders`, `POST /api/purchase_orders/{id}/receive`                                              |
 | Production     | `/api/production_orders`, `POST /api/production_orders/{id}/complete`                                         |
-| Sales          | `/api/sales_orders`, `POST /api/sales_orders/{id}/cancel`                                                     |
+| Sales          | `/api/sales_orders`, `PUT /api/sales_orders/{id}`, `POST /api/sales_orders/{id}/cancel`, `POST /api/sales_orders/{id}/refund` |
 | Import         | `POST /api/marketplace/import`                                                                                |
 | Finance        | `/api/accounts`, `/api/financial_transactions`, `/api/expenses`                                               |
 | Reports        | `GET /api/reports/profit_loss`, `/api/reports/export/*`                                                       |

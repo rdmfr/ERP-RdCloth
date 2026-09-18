@@ -47,3 +47,9 @@ hosting, database setup, domain, TLS, email provider, backups, and production se
 
 Before publishing, add the final commercial license, support policy, version number, and
 screenshots to the marketplace listing.
+
+## Included commercial documents
+
+- [Commercial license](../LICENSE)
+- [Support policy](SUPPORT_POLICY.md)
+- [Production and backup checklist](../RUNNING.md)

@@ -23,6 +23,15 @@ export function Sales() {
       reload();
     } catch (e) { toast.error(formatErr(e.response?.data?.detail)); }
   };
+  const refund = async (row) => {
+    const amount = window.prompt("Refund amount", String(row.total));
+    if (amount === null) return;
+    try {
+      await api.post(`/sales_orders/${row.id}/refund`, { amount: Number(amount) });
+      toast.success("Refund recorded");
+      reload();
+    } catch (e) { toast.error(formatErr(e.response?.data?.detail)); }
+  };
 
   return (
     <div>
@@ -45,7 +54,10 @@ export function Sales() {
           { header:"Profit", cell:r=><span className={r.net_profit>=0?"text-emerald-600 font-semibold":"text-rose-600 font-semibold"}>{fmtIDR(r.net_profit)}</span> },
           { header:"Payment", cell:r=><StatusPill status={r.payment_status}/> },
           { header:"Fulfillment", cell:r=><StatusPill status={r.fulfillment_status}/> },
-          { header:"", cell:r=>r.fulfillment_status!=="cancelled" && <button onClick={()=>cancel(r.id)} data-testid={`cancel-sale-${r.id}`} className="text-xs text-rose-600 hover:underline font-semibold">Cancel</button>},
+          { header:"", cell:r=><div className="flex gap-2">
+            {r.fulfillment_status!=="cancelled" && <button onClick={()=>cancel(r.id)} data-testid={`cancel-sale-${r.id}`} className="text-xs text-rose-600 hover:underline font-semibold">Cancel</button>}
+            {r.payment_status==="paid" && r.fulfillment_status!=="cancelled" && <button onClick={()=>refund(r)} className="text-xs text-amber-600 hover:underline font-semibold">Refund</button>}
+          </div>},
         ]}/>
       {creating && <SalesForm products={products} customers={customers} marketplaces={marketplaces} onClose={()=>setCreating(false)} onDone={()=>{ setCreating(false); reload(); }} />}
     </div>

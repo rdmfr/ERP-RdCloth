@@ -5,7 +5,8 @@ import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTheme } from "@/contexts/ThemeContext";
 import OnboardingWizard from "./OnboardingWizard";
-import { APP_CONFIG, getBusinessPreferences } from "@/config/appConfig";
+import { APP_CONFIG, getBusinessPreferences, saveBusinessPreferences } from "@/config/appConfig";
+import { SUPPORTED_LANGUAGES, t } from "@/lib/i18n";
 
 export default function Settings() {
   const { user } = useAuth();
@@ -23,8 +24,11 @@ export default function Settings() {
   const [userModal, setUserModal] = useState(null);
   const [mpModal, setMpModal] = useState(null);
   const [auditDetail, setAuditDetail] = useState(null);
+  const [profile, setProfile] = useState({ business_name:"", currency:"USD", locale:"en-US", timezone:"UTC", tax_enabled:false, tax_name:"Tax", tax_rate:0, tax_inclusive:false });
+  const [savingProfile, setSavingProfile] = useState(false);
 
   useEffect(() => { if (user?.role === "owner") api.get("/audit_logs").then(r=>setAudit(r.data)); }, [user]);
+  useEffect(() => { api.get("/settings/business-profile").then(r=>setProfile(p=>({...p,...r.data}))).catch(()=>{}); }, []);
 
   const tabs = [
     ["general","General"],["categories","Categories"],["marketplaces","Marketplaces"],["expense_categories","Expense Categories"],
@@ -42,7 +46,7 @@ export default function Settings() {
 
   return (
     <div>
-      <PageHeader title="Settings" subtitle="Konfigurasi bisnis"/>
+      <PageHeader title={t("settings")} subtitle="Business configuration"/>
       <div className="flex gap-2 mb-4 flex-wrap">
         {tabs.map(([k,l])=>(
           <button key={k} onClick={()=>setTab(k)} data-testid={`settings-tab-${k}`}
@@ -52,6 +56,15 @@ export default function Settings() {
 
       {tab==="general" && (
         <div className="p-6 rounded-lg border border-border bg-card space-y-4">
+          <div className="grid md:grid-cols-2 gap-4">
+            <Field label={t("businessProfile")}><Input value={profile.business_name} onChange={e=>setProfile({...profile,business_name:e.target.value})} placeholder="Your business name"/></Field>
+            <Field label={t("language")}><Select value={getBusinessPreferences().language} onChange={e=>{saveBusinessPreferences({language:e.target.value}); window.location.reload();}}>{SUPPORTED_LANGUAGES.map(x=><option key={x.value} value={x.value}>{x.label}</option>)}</Select></Field>
+            <Field label="Currency"><Input value={profile.currency} onChange={e=>setProfile({...profile,currency:e.target.value.toUpperCase()})}/></Field>
+            <Field label="Locale"><Input value={profile.locale} onChange={e=>setProfile({...profile,locale:e.target.value})}/></Field>
+            <Field label={t("timezone")}><Input value={profile.timezone} onChange={e=>setProfile({...profile,timezone:e.target.value})} placeholder="Asia/Jakarta"/></Field>
+            <Field label={t("tax")}><div className="flex gap-2"><Input type="number" value={profile.tax_rate} onChange={e=>setProfile({...profile,tax_rate:e.target.value})}/><label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={profile.tax_enabled} onChange={e=>setProfile({...profile,tax_enabled:e.target.checked})}/> Enabled</label></div></Field>
+          </div>
+          <Button disabled={savingProfile || user?.role !== "owner"} onClick={async()=>{setSavingProfile(true);try{await api.put("/settings/business-profile",profile);saveBusinessPreferences(profile);toast.success("Business profile saved");}catch(e){toast.error(formatErr(e.response?.data?.detail));}finally{setSavingProfile(false);}}}>{savingProfile ? "Saving..." : t("save")}</Button>
           <div className="flex items-center justify-between">
             <div><div className="font-display font-bold">Theme</div><div className="text-sm text-muted-foreground">Light atau Dark mode</div></div>
             <Button variant="outline" onClick={toggle} data-testid="settings-theme">{theme==="dark"?"Dark":"Light"}</Button>

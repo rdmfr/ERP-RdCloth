@@ -37,6 +37,8 @@ OWNER_PASSWORD=change-this-demo-password
 OWNER_NAME=Business Owner
 ATTACHMENTS_DIR=./data/attachments
 SKIP_DEMO_SEED=1  # optional: skip demo data seeding on startup
+DEMO_MODE=false
+MAX_ATTACHMENT_SIZE_MB=10
 ```
 
 The backend pings MongoDB during startup. For an Atlas URL, invalid credentials or
@@ -110,3 +112,27 @@ cd D:\Project\RD-ERP-main\frontend; $env:REACT_APP_BACKEND_URL='http://localhost
 ```
 
 If you want, I can also add a small `docker-compose.yml` later to simplify local setup.
+
+## Production security checklist
+
+- Set `ENVIRONMENT=production`, `DEMO_MODE=false`, and `SKIP_DEMO_SEED=1`.
+- Generate a unique `JWT_SECRET` of at least 32 random characters.
+- Use a restricted MongoDB user and never expose MongoDB directly to the internet.
+- Set `CORS_ORIGINS` to the exact HTTPS frontend origin; do not use `*`.
+- Put the application behind HTTPS and a reverse proxy.
+- Review attachment size/type limits and protect the attachment directory.
+- Schedule database and attachment backups, then perform a restore test.
+- Rotate credentials and dependencies regularly.
+
+## Backup and restore
+
+Install MongoDB Database Tools, set `MONGO_URL`, `DB_NAME`, and `ATTACHMENTS_DIR`,
+then run from the repository root:
+
+```powershell
+.\scripts\backup.ps1
+.\scripts\restore.ps1 -Backup .\backups\20260918-120000
+```
+
+Restore replaces the selected database. Stop application traffic first and verify the
+backup folder before restoring.
