@@ -1084,6 +1084,24 @@ async def create_document_journal(user, document_type, document):
         "source_id": document["id"], "created_by": user["id"], "created_at": now_iso(),
     })
 
+async def create_payment_journal(user, document_type, document_id, amount, account_id):
+    account = await db.accounts.find_one({"id": account_id})
+    counter_kind = "receivable" if document_type == "invoice" else "liability"
+    counter = await db.accounts.find_one({"kind": counter_kind})
+    if not account or not counter:
+        return
+    await db.journal_entries.insert_one({
+        "id": new_id(), "date": now_iso(),
+        "reference": f"{'INV' if document_type == 'invoice' else 'BILL'}-PAY-{document_id[:8]}",
+        "description": f"{'Invoice' if document_type == 'invoice' else 'Bill'} payment",
+        "lines": [
+            {"account_id": account_id, "description": "Payment account", "debit": amount if document_type == "invoice" else 0, "credit": amount if document_type == "bill" else 0},
+            {"account_id": counter["id"], "description": "Settlement", "debit": amount if document_type == "bill" else 0, "credit": amount if document_type == "invoice" else 0},
+        ],
+        "total": amount, "source_type": f"{document_type}_payment",
+        "source_id": document_id, "created_by": user["id"], "created_at": now_iso(),
+    })
+
 @api.get("/financial_transactions", dependencies=[Depends(require_module("finance"))])
 async def list_txns():
     return await db.financial_transactions.find({}, {"_id": 0}).sort("date", -1).to_list(1000)
@@ -1161,7 +1179,9 @@ async def pay_invoice(item_id: str, body: Dict[str, Any], user: dict = Depends(r
     paid = float(invoice.get("paid_amount", 0)) + amount
     status_value = "paid" if paid >= float(invoice.get("amount", 0)) else "partial"
     await db.invoices.update_one({"id": item_id}, {"$set": {"paid_amount": paid, "status": status_value, "updated_at": now_iso()}})
-    await create_financial_transaction(user, "income", amount, body.get("account_id"), f"Invoice {invoice.get('number', item_id)}", "invoice_payment", item_id)
+    account_id = body.get("account_id") or await get_default_account_id()
+    await create_financial_transaction(user, "income", amount, account_id, f"Invoice {invoice.get('number', item_id)}", "invoice_payment", item_id)
+    await create_payment_journal(user, "invoice", item_id, amount, account_id)
     return {"ok": True, "paid_amount": paid, "status": status_value}
 
 @api.post("/finance/bills/{item_id}/payment")
@@ -1177,7 +1197,9 @@ async def pay_bill(item_id: str, body: Dict[str, Any], user: dict = Depends(requ
     paid = float(bill.get("paid_amount", 0)) + amount
     status_value = "paid" if paid >= float(bill.get("amount", 0)) else "partial"
     await db.bills.update_one({"id": item_id}, {"$set": {"paid_amount": paid, "status": status_value, "updated_at": now_iso()}})
-    await create_financial_transaction(user, "expense", amount, body.get("account_id"), f"Bill {bill.get('number', item_id)}", "bill_payment", item_id)
+    account_id = body.get("account_id") or await get_default_account_id()
+    await create_financial_transaction(user, "expense", amount, account_id, f"Bill {bill.get('number', item_id)}", "bill_payment", item_id)
+    await create_payment_journal(user, "bill", item_id, amount, account_id)
     return {"ok": True, "paid_amount": paid, "status": status_value}
 
 @api.get("/finance/tax-summary")
@@ -1305,15 +1327,20 @@ async def refund_sale(sid: str, body: Dict[str, Any], user: dict = Depends(requi
         raise HTTPException(404, "Order not found")
     if so.get("fulfillment_status") == "cancelled":
         raise HTTPException(400, "Order already cancelled")
-    if await db.financial_transactions.find_one({"ref_type": "sales_refund", "ref_id": sid}):
+    order_total = float(so.get("total", 0))
+    prior_refunds = await db.financial_transactions.find({"ref_type": "sales_refund", "ref_id": sid, "type": "expense"}).to_list(1000)
+    refunded_before = float(so.get("refund_amount", 0)) or sum(float(txn.get("amount", 0)) for txn in prior_refunds)
+    outstanding = order_total - refunded_before
+    if outstanding <= 0:
         raise HTTPException(409, "Order already refunded")
-    amount = positive(body.get("amount", so.get("total", 0)), "Refund amount")
-    if amount > float(so.get("total", 0)):
+    amount = positive(body.get("amount", outstanding), "Refund amount")
+    if amount > outstanding:
         raise HTTPException(400, "Refund cannot exceed order total")
     prior = await db.financial_transactions.find_one({"ref_type": "sales_order", "ref_id": sid, "type": "income"})
     if prior:
         await create_financial_transaction(user, "expense", amount, prior.get("account_id"), f"Refund {so['order_number']}", "sales_refund", sid)
-    await db.sales_orders.update_one({"id": sid}, {"$set": {"payment_status": "refunded" if amount >= float(so.get("total", 0)) else "partially_refunded", "refund_amount": amount, "updated_at": now_iso()}})
+    refunded_total = refunded_before + amount
+    await db.sales_orders.update_one({"id": sid}, {"$set": {"payment_status": "refunded" if refunded_total >= order_total else "partially_refunded", "refund_amount": refunded_total, "updated_at": now_iso()}})
     await audit(user, "refund", "sales_order", sid, so, {"amount": amount})
     return {"ok": True, "amount": amount}
 
@@ -1551,15 +1578,25 @@ async def create_return(body: Dict[str, Any], user: dict = Depends(require_modul
     item = next((item for item in sales_order.get("items", []) if item.get("variant_sku") == body.get("variant_sku")), None)
     if not item or quantity > float(item.get("quantity", 0)):
         raise HTTPException(400, "Return quantity exceeds the sold quantity")
-    existing = await db.returns.find_one({"sales_order_id": sales_order_id, "variant_sku": body.get("variant_sku"), "status": {"$ne": "cancelled"}})
-    returned_before = float(existing.get("quantity", 0)) if existing else 0
+    active_returns = await db.returns.find({"sales_order_id": sales_order_id, "variant_sku": body.get("variant_sku"), "status": {"$ne": "cancelled"}}).to_list(1000)
+    returned_before = sum(float(existing.get("quantity", 0)) for existing in active_returns)
     if returned_before + quantity > float(item.get("quantity", 0)):
         raise HTTPException(400, "Total returned quantity exceeds the sold quantity")
+    condition = str(body.get("condition", "good")).lower()
+    if condition not in {"good", "resalable", "damaged", "defective"}:
+        raise HTTPException(400, "Invalid return condition")
+    line_total = float(item.get("selling_price", 0)) * float(item.get("quantity", 0))
+    refunded_before = sum(float(existing.get("refund_amount", 0)) for existing in active_returns)
+    refund_amount = nonnegative(body.get("refund_amount", 0), "Refund amount")
+    if refund_amount > line_total - refunded_before:
+        raise HTTPException(400, "Total refund exceeds the sold item amount")
+    cogs_reversal = float(item.get("cost", 0)) * quantity if condition in {"good", "resalable"} else 0
     return_id = new_id()
     return_doc = {"id": return_id, "sales_order_id": sales_order_id, "variant_sku": body.get("variant_sku"), "quantity": quantity,
-                  "condition": body.get("condition", "good"), "reason": body.get("reason", ""), "refund_amount": nonnegative(body.get("refund_amount", 0), "Refund amount"),
+                  "condition": condition, "reason": body.get("reason", ""), "refund_amount": refund_amount,
+                  "cogs_reversal": cogs_reversal,
                   "status": "received", "created_at": now_iso(), "user_id": user["id"]}
-    if return_doc["condition"] == "good":
+    if condition in {"good", "resalable"}:
         product = await db.products.find_one({"id": item["product_id"]})
         if product:
             variants = product.get("variants", [])
@@ -1568,6 +1605,13 @@ async def create_return(body: Dict[str, Any], user: dict = Depends(require_modul
                 before = float(variant.get("stock", 0)); variant["stock"] = before + quantity
                 await db.products.update_one({"id": product["id"]}, {"$set": {"variants": variants, "updated_at": now_iso()}})
                 await record_movement("product", product["id"], item["variant_sku"], quantity, "return", before, variant["stock"], user["id"], f"Return {sales_order['order_number']}")
+        if cogs_reversal:
+            new_cogs = max(0, float(sales_order.get("cogs", 0)) - cogs_reversal)
+            await db.sales_orders.update_one({"id": sales_order_id}, {"$set": {
+                "cogs": new_cogs,
+                "net_profit": float(sales_order.get("net_profit", 0)) + cogs_reversal,
+                "updated_at": now_iso(),
+            }})
     await db.returns.insert_one(return_doc)
     if return_doc["refund_amount"] > 0:
         prior = await db.financial_transactions.find_one({"ref_type": "sales_order", "ref_id": sales_order_id, "type": "income"})

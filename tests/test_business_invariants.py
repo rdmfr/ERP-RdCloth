@@ -14,7 +14,7 @@ from backend import server
 
 class BusinessInvariantTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
-        for collection in ("products", "materials", "production_orders", "sales_orders", "suppliers", "customers", "accounts", "marketplaces", "expense_categories", "financial_transactions", "inventory_movements"):
+        for collection in ("products", "materials", "production_orders", "sales_orders", "returns", "suppliers", "customers", "accounts", "marketplaces", "expense_categories", "financial_transactions", "inventory_movements"):
             await server.db[collection].delete_many({})
         self.user = {"id": "test-user", "email": "test@example.com", "role": "owner"}
 
@@ -187,7 +187,39 @@ class BusinessInvariantTests(unittest.IsolatedAsyncioTestCase):
         await server.create_return({"sales_order_id": sale["id"], "variant_sku": "RETURN-M", "quantity": 1, "condition": "good", "refund_amount": 50000}, self.user)
         product = await server.db.products.find_one({"id": "return-product"})
         self.assertEqual(product["variants"][0]["stock"], 1)
+        returned_sale = await server.db.sales_orders.find_one({"id": sale["id"]})
+        self.assertEqual(returned_sale["cogs"], 0)
         self.assertEqual(await server.db.financial_transactions.count_documents({"ref_type": "return"}), 1)
+
+    async def test_partial_refunds_are_cumulative_and_cannot_exceed_total(self):
+        await server.db.accounts.insert_one({"id": "refund-account", "name": "Kas", "balance": 100000, "is_default": True})
+        await server.db.products.insert_one({"id": "refund-product", "name": "Kaos", "variants": [{"sku": "REFUND-M", "stock": 1, "cost": 30000}]})
+        sale = await server.create_sales({
+            "items": [{"product_id": "refund-product", "variant_sku": "REFUND-M", "quantity": 1, "selling_price": 50000}],
+        }, self.user)
+
+        await server.refund_sale(sale["id"], {"amount": 20000}, self.user)
+        with self.assertRaises(HTTPException):
+            await server.refund_sale(sale["id"], {"amount": 40000}, self.user)
+        await server.refund_sale(sale["id"], {"amount": 30000}, self.user)
+
+        refunded = await server.db.sales_orders.find_one({"id": sale["id"]})
+        self.assertEqual(refunded["refund_amount"], 50000)
+        self.assertEqual(refunded["payment_status"], "refunded")
+        self.assertEqual(await server.db.financial_transactions.count_documents({"ref_type": "sales_refund"}), 2)
+
+    async def test_return_quantity_is_cumulative_and_damaged_return_keeps_cogs(self):
+        await server.db.accounts.insert_one({"id": "return-account-2", "name": "Kas", "balance": 0, "is_default": True})
+        await server.db.products.insert_one({"id": "return-product-2", "name": "Kaos", "variants": [{"sku": "RETURN-2", "stock": 2, "cost": 30000}]})
+        sale = await server.create_sales({
+            "items": [{"product_id": "return-product-2", "variant_sku": "RETURN-2", "quantity": 2, "selling_price": 50000}],
+        }, self.user)
+
+        await server.create_return({"sales_order_id": sale["id"], "variant_sku": "RETURN-2", "quantity": 1, "condition": "damaged"}, self.user)
+        with self.assertRaises(HTTPException):
+            await server.create_return({"sales_order_id": sale["id"], "variant_sku": "RETURN-2", "quantity": 2, "condition": "good"}, self.user)
+        returned_sale = await server.db.sales_orders.find_one({"id": sale["id"]})
+        self.assertEqual(returned_sale["cogs"], 60000)
 
     def test_audit_values_are_json_safe(self):
         value = server.json_safe({"id": ObjectId("507f1f77bcf86cd799439011")})
