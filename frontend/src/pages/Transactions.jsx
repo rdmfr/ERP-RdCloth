@@ -58,7 +58,10 @@ export function Sales() {
       }/>
       <DataTable testid="sales-table" rows={rows}
         columns={[
-          { header:"Order #", cell:r=><span className="font-mono text-xs font-semibold">{r.order_number}</span> },
+          { header:"Order #", cell:r=><div className="min-w-[128px]">
+            <span className="font-mono text-xs font-semibold block">{r.order_number}</span>
+            <button onClick={()=>downloadInvoicePdf(r)} className="mt-1 text-[10px] text-emerald-600 hover:underline font-bold">Download PDF</button>
+          </div> },
           { header:"Date", cell:r=>fmtDate(r.date) },
           { header:"Customer", cell:r=>r.customer_name||customers.find(c=>c.id===r.customer_id)?.name||"-" },
           { header:"Channel", cell:r=>r.sales_channel },
