@@ -29,10 +29,13 @@ pip install -r requirements.txt
 3. Create an env file or set env vars. Example `.env` values:
 
 ```
-# MongoDB Atlas (replace <db_password>; URL-encode special characters)
-MONGO_URL=mongodb+srv://rdmfr59_db_user:<db_password>@cluster0.zygezd2.mongodb.net/?retryWrites=true&w=majority
-DB_NAME=rdcloth
-JWT_SECRET=change-me-to-a-secure-random-value
+MONGO_URL=mongodb://127.0.0.1:27017
+DB_NAME=nexabiz
+JWT_SECRET=replace-with-a-random-secret-at-least-32-characters
+OWNER_EMAIL=owner@example.com
+OWNER_PASSWORD=change-this-demo-password
+OWNER_NAME=Business Owner
+ATTACHMENTS_DIR=./data/attachments
 SKIP_DEMO_SEED=1  # optional: skip demo data seeding on startup
 ```
 

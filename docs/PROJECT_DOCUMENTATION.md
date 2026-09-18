@@ -67,10 +67,10 @@ Backend membaca konfigurasi berikut:
 | Variable         | Default              | Keterangan                                          |
 | ---------------- | -------------------- | --------------------------------------------------- |
 | `MONGO_URL`      | wajib diisi          | Connection string MongoDB atau Atlas                |
-| `DB_NAME`        | `rdcloth`            | Nama database                                       |
+| `DB_NAME`        | `nexabiz`            | Database name                                      |
 | `JWT_SECRET`     | development fallback | Secret untuk token JWT; wajib diganti di production |
-| `OWNER_EMAIL`    | `rddev@gmail.com`    | Email owner saat seed                               |
-| `OWNER_PASSWORD` | `rdcloth2026`        | Password owner saat seed                            |
+| `OWNER_EMAIL`    | `owner@example.com`  | Owner email during seed                            |
+| `OWNER_PASSWORD` | configured secret    | Owner password during seed                         |
 | `SKIP_DEMO_SEED` | kosong               | Isi `1` untuk melewati seed demo                    |
 
 Jangan commit file `.env` atau secret production.
@@ -79,10 +79,10 @@ Jangan commit file `.env` atau secret production.
 
 | Role       | Email                   | Password        | Fokus akses                                                 |
 | ---------- | ----------------------- | --------------- | ----------------------------------------------------------- |
-| Owner      | `rddev@gmail.com`       | `rdcloth2026`   | Semua modul dan konfigurasi                                 |
-| Admin      | `admin@rdcloth.id`      | `admin123`      | Sales, products, inventory, customers, suppliers, materials |
-| Production | `production@rdcloth.id` | `production123` | Production, inventory, products, materials                  |
-| Finance    | `finance@rdcloth.id`    | `finance123`    | Finance, reports, purchasing, sales, assets                 |
+| Owner      | configured with `OWNER_EMAIL` | configured secret | All modules and configuration |
+| Admin      | `admin@example.com`           | `admin123`        | Sales, products, inventory, customers, suppliers, materials |
+| Production | `production@example.com`      | `production123`   | Production, inventory, products, materials |
+| Finance    | `finance@example.com`         | `finance123`      | Finance, reports, purchasing, sales, assets |
 
 Password di atas hanya untuk development/demo. Ganti atau nonaktifkan sebelum deployment.
 
@@ -279,7 +279,7 @@ Untuk production, set environment variable berikut di platform hosting, bukan di
 
 ```text
 MONGO_URL=mongodb+srv://...
-DB_NAME=rdcloth
+DB_NAME=nexabiz
 JWT_SECRET=<random-secret>
 OWNER_EMAIL=<production-owner-email>
 OWNER_PASSWORD=<strong-password>

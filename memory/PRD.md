@@ -9,7 +9,7 @@ The product is a self-hosted ERP template for **NexaBiz** customers, designed fo
 - Design: Minimalist monochrome (Manrope + IBM Plex Sans), Light + Dark mode
 
 ## Roles & Permissions (backend-enforced)
-- **owner** — `errnhw@gmail.com` / `rdcloth2026` — full access
+- **owner** — configured with `OWNER_EMAIL` / `OWNER_PASSWORD` — full access
 - **admin** — sales, orders, products, inventory, customers, suppliers, materials
 - **production** — production, inventory, products, materials
 - **finance** — finance, reports, purchasing, sales, expenses, assets

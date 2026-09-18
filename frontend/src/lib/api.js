@@ -7,7 +7,7 @@ const API = `${backendUrl}/api`;
 export const api = axios.create({ baseURL: API });
 
 api.interceptors.request.use((cfg) => {
-  const token = localStorage.getItem("rdcloth_token");
+  const token = localStorage.getItem("nexabiz_token");
   if (token) cfg.headers.Authorization = `Bearer ${token}`;
   return cfg;
 });
@@ -16,7 +16,7 @@ api.interceptors.response.use(
   (r) => r,
   (e) => {
     if (e.response?.status === 401) {
-      localStorage.removeItem("rdcloth_token");
+      localStorage.removeItem("nexabiz_token");
       if (!window.location.pathname.startsWith("/login")) {
         window.location.href = "/login";
       }

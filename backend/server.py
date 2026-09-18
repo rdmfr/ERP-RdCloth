@@ -123,7 +123,7 @@ app.add_middleware(
 )
 
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("rdcloth")
+logger = logging.getLogger("nexabiz")
 
 # ---------- Helpers ----------
 def new_id() -> str:
@@ -161,24 +161,24 @@ def positive(value: Any, field: str) -> float:
 def hash_password(pwd: str) -> str:
     return bcrypt.hashpw(pwd.encode(), bcrypt.gensalt()).decode()
 
-DEFAULT_OWNER_EMAIL = os.environ.get("OWNER_EMAIL", "rddev@gmail.com").lower()
-DEFAULT_OWNER_PASSWORD = os.environ.get("OWNER_PASSWORD", "rdcloth2026")
+DEFAULT_OWNER_EMAIL = os.environ.get("OWNER_EMAIL", "owner@example.com").lower()
+DEFAULT_OWNER_PASSWORD = os.environ.get("OWNER_PASSWORD", "change-this-demo-password")
 
 FALLBACK_USERS = {
     DEFAULT_OWNER_EMAIL: {
         "id": "owner-demo", "email": DEFAULT_OWNER_EMAIL, "name": "NexaBiz Owner", "role": "owner",
         "password_hash": hash_password(DEFAULT_OWNER_PASSWORD),
     },
-    "admin@rdcloth.id": {
-        "id": "admin-demo", "email": "admin@rdcloth.id", "name": "Admin Staff", "role": "admin",
+    "admin@example.com": {
+        "id": "admin-demo", "email": "admin@example.com", "name": "Admin Staff", "role": "admin",
         "password_hash": hash_password("admin123"),
     },
-    "production@rdcloth.id": {
-        "id": "production-demo", "email": "production@rdcloth.id", "name": "Production Staff", "role": "production",
+    "production@example.com": {
+        "id": "production-demo", "email": "production@example.com", "name": "Production Staff", "role": "production",
         "password_hash": hash_password("production123"),
     },
-    "finance@rdcloth.id": {
-        "id": "finance-demo", "email": "finance@rdcloth.id", "name": "Finance Staff", "role": "finance",
+    "finance@example.com": {
+        "id": "finance-demo", "email": "finance@example.com", "name": "Finance Staff", "role": "finance",
         "password_hash": hash_password("finance123"),
     },
 }
@@ -1654,9 +1654,9 @@ async def seed_all():
 
     # test users
     for email, pwd, name, role in [
-        ("admin@rdcloth.id", "admin123", "Admin Staff", "admin"),
-        ("production@rdcloth.id", "production123", "Production Staff", "production"),
-        ("finance@rdcloth.id", "finance123", "Finance Staff", "finance"),
+        ("admin@example.com", "admin123", "Admin Staff", "admin"),
+        ("production@example.com", "production123", "Production Staff", "production"),
+        ("finance@example.com", "finance123", "Finance Staff", "finance"),
     ]:
         if not await db.users.find_one({"email": email}):
             await db.users.insert_one({

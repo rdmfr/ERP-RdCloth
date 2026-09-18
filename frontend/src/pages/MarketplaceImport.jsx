@@ -74,7 +74,7 @@ export default function MarketplaceImport() {
   const downloadSample = () => {
     const blob = new Blob([SAMPLE_CSV], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement("a"); a.href = url; a.download = "rdcloth_import_template.csv"; a.click(); URL.revokeObjectURL(url);
+    const a = document.createElement("a"); a.href = url; a.download = "nexabiz_import_template.csv"; a.click(); URL.revokeObjectURL(url);
   };
 
   return (

@@ -3,7 +3,7 @@ import unittest
 from bson import ObjectId
 
 os.environ.setdefault("MONGO_URL", "mongodb://localhost:27017")
-os.environ.setdefault("DB_NAME", "rdcloth_test")
+os.environ.setdefault("DB_NAME", "nexabiz_test")
 os.environ.setdefault("JWT_SECRET", "test-secret")
 os.environ["USE_MOCK_DB"] = "true"
 

@@ -2,5 +2,5 @@
 // in ./auth.js (keys camelCase, values kebab-case `<feature>-<element>`).
 
 export const HOME = {
-	rdclothLink: 'home-rdcloth-link',
+	nexabizLink: 'home-nexabiz-link',
 };

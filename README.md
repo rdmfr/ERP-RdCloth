@@ -13,6 +13,30 @@ Self-hosted ERP template untuk UMKM dan small businesses di Indonesia maupun pas
 - **Pesanan Penjualan (Sales Orders)**: Pencatatan transaksi penjualan, pengiriman barang, dan kalkulasi piutang.
 - **Keuangan & Transaksi**: Pencatatan arus kas (pemasukan & pengeluaran) dan jurnal aktivitas operasional.
 
+## Why NexaBiz
+
+NexaBiz is designed as a practical, self-hosted business template for small teams that
+need more than a spreadsheet but are not ready for a complex enterprise suite.
+
+- Configure the business name, locale, currency, and regional number/date format during setup.
+- Keep sales, purchasing, inventory, production, finance, and reports in one workspace.
+- Start with local development or deploy to your own server, VPS, or cloud account.
+- Adapt the same foundation to retail, services, wholesale, custom products, workshops, and light manufacturing.
+
+### Product listing copy
+
+**Short description:** Self-hosted ERP template for small businesses: sales, inventory,
+purchasing, production, finance, marketplace imports, reports, and pricing tools.
+
+**Who it is for:** UMKM owners, online sellers, workshops, small manufacturers, agencies
+with stock, and growing businesses that want operational visibility without monthly lock-in.
+
+**Included:** React frontend, FastAPI backend, MongoDB integration, role-based access,
+onboarding wizard, dashboard, business tools, demo data, and local deployment documentation.
+
+**Important:** This is a self-hosted software template. Buyers provide their own hosting,
+database, domain, email service, and production secrets.
+
 ---
 
 ## Arsitektur & Teknologi
@@ -68,16 +92,16 @@ Aplikasi frontend akan terbuka di `http://localhost:3000`.
 
 ---
 
-## Akun Demo Bawaan
+## Demo Configuration
 
 Sistem sudah dilengkapi dengan demo seed data dan beberapa akun pengguna untuk pengujian role:
 
 | Peran (Role) | Email | Password |
 |---|---|---|
-| **Owner** | `rddev@gmail.com` | `rdcloth2026` |
-| **Admin** | `admin@rdcloth.id` | `admin123` |
-| **Production** | `production@rdcloth.id` | `production123` |
-| **Finance** | `finance@rdcloth.id` | `finance123` |
+| **Owner** | configured with `OWNER_EMAIL` | configured with `OWNER_PASSWORD` |
+| **Admin** | `admin@example.com` | `admin123` |
+| **Production** | `production@example.com` | `production123` |
+| **Finance** | `finance@example.com` | `finance123` |
 
 ---
 
@@ -100,4 +124,4 @@ RD-ERP-main/
 
 ## Lisensi
 
-Internal / Private Repository.
+Template license: define the commercial license and redistribution terms before publishing.
