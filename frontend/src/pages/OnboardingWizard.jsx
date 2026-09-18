@@ -3,6 +3,7 @@ import { api, formatErr } from "@/lib/api";
 import { toast } from "sonner";
 import { Modal, Field, Input, Select, Button, useCRUD } from "./_shared";
 import { CheckCircle2, ArrowRight, ArrowLeft, X } from "lucide-react";
+import { APP_CONFIG, saveBusinessPreferences } from "@/config/appConfig";
 
 const STEPS = ["Business", "Currency", "Capital", "Marketplace", "Product", "Opening Inventory", "Complete"];
 
@@ -17,8 +18,9 @@ export function useOnboardingStatus() {
 export default function OnboardingWizard({ onClose, forceOpen = false }) {
   const [step, setStep] = useState(0);
   const [form, setForm] = useState({
-    business_name: "RdCloth",
-    currency: "IDR",
+    business_name: "",
+    currency: APP_CONFIG.defaultCurrency,
+    locale: APP_CONFIG.defaultLocale,
     initial_capital: 4000000,
     account_name: "Kas Tunai",
     marketplace_name: "",
@@ -40,9 +42,11 @@ export default function OnboardingWizard({ onClose, forceOpen = false }) {
       await api.post("/onboarding/complete", {
         business_name: form.business_name,
         currency: form.currency,
+        locale: form.locale,
         initial_capital: Number(form.initial_capital || 0),
         account_name: form.account_name,
       });
+      saveBusinessPreferences({ locale: form.locale, currency: form.currency });
       // 2. marketplace (optional)
       if (form.marketplace_name) {
         await api.post("/marketplaces", { name: form.marketplace_name, admin_fee_pct: Number(form.marketplace_admin_fee || 0), service_fee_pct: 0, payment_fee_pct: 0 });
@@ -56,7 +60,7 @@ export default function OnboardingWizard({ onClose, forceOpen = false }) {
           variants: [{ sku: form.variant_sku || form.product_sku, color: "", size: "OS", stock: Number(form.opening_stock || 0), cost: Number(form.opening_cost || 0), selling_price: Number(form.product_selling_price || 0) }],
         });
       }
-      toast.success("Setup selesai. Selamat datang di RdCloth!");
+      toast.success(`Setup complete. Welcome to ${APP_CONFIG.name}.`);
       setStep(STEPS.length - 1);
       setTimeout(() => { onClose?.(); window.location.reload(); }, 1500);
     } catch (e) {
@@ -90,18 +94,29 @@ export default function OnboardingWizard({ onClose, forceOpen = false }) {
         <div className="p-6 min-h-[280px]">
           {step === 0 && (
             <div className="space-y-3" data-testid="step-business">
-              <p className="text-sm text-muted-foreground mb-4">Kenali bisnismu — masukkan nama brand yang akan tampil di seluruh aplikasi.</p>
-              <Field label="Nama Bisnis"><Input value={form.business_name} onChange={(e) => set("business_name", e.target.value)} data-testid="wiz-business-name" /></Field>
+              <p className="text-sm text-muted-foreground mb-4">Set the business identity shown throughout your workspace.</p>
+              <Field label="Business Name"><Input value={form.business_name} onChange={(e) => set("business_name", e.target.value)} placeholder="Your business name" data-testid="wiz-business-name" /></Field>
             </div>
           )}
           {step === 1 && (
             <div className="space-y-3" data-testid="step-currency">
-              <p className="text-sm text-muted-foreground mb-4">Pilih mata uang default untuk semua transaksi.</p>
+              <p className="text-sm text-muted-foreground mb-4">Choose the currency and regional format used for transactions.</p>
               <Field label="Currency">
                 <Select value={form.currency} onChange={(e) => set("currency", e.target.value)}>
-                  <option value="IDR">IDR — Rupiah</option>
-                  <option value="USD">USD — Dollar</option>
-                  <option value="MYR">MYR — Ringgit</option>
+                  <option value="USD">USD — US Dollar</option>
+                  <option value="IDR">IDR — Indonesian Rupiah</option>
+                  <option value="EUR">EUR — Euro</option>
+                  <option value="GBP">GBP — Pound Sterling</option>
+                  <option value="MYR">MYR — Malaysian Ringgit</option>
+                  <option value="SGD">SGD — Singapore Dollar</option>
+                </Select>
+              </Field>
+              <Field label="Locale">
+                <Select value={form.locale} onChange={(e) => set("locale", e.target.value)}>
+                  <option value="en-US">English (United States)</option>
+                  <option value="id-ID">Bahasa Indonesia</option>
+                  <option value="en-GB">English (United Kingdom)</option>
+                  <option value="ms-MY">Bahasa Melayu</option>
                 </Select>
               </Field>
             </div>

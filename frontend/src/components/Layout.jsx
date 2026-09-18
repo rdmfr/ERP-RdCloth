@@ -3,6 +3,7 @@ import { NavLink, useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTheme } from "@/contexts/ThemeContext";
 import { api } from "@/lib/api";
+import { APP_CONFIG } from "@/config/appConfig";
 import {
   LayoutDashboard, ShoppingCart, Package, Boxes, Truck, Users, Factory,
   Wallet, FileBarChart, Calculator, HardHat, Settings, Sun, Moon,
@@ -44,6 +45,21 @@ export default function Layout({ children }) {
 
   const items = NAV.filter((n) => canAccess(n.module));
 
+  const openSearchResult = (result) => {
+    const routes = {
+      product: "/products",
+      customer: "/customers",
+      supplier: "/suppliers",
+      sales_order: "/sales",
+      purchase_order: "/purchasing",
+      production_order: "/production",
+    };
+    const route = routes[result.type];
+    setSearch("");
+    setSearchResults([]);
+    if (route) nav(route);
+  };
+
   useEffect(() => {
     if (search.trim().length < 2) { setSearchResults([]); return; }
     const timer = setTimeout(() => api.get(`/search?q=${encodeURIComponent(search)}`).then(r => setSearchResults(r.data)).catch(() => setSearchResults([])), 250);
@@ -62,8 +78,8 @@ export default function Layout({ children }) {
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 rounded-md bg-neutral-900 dark:bg-stone-100 flex items-center justify-center text-white dark:text-stone-900 font-black text-sm font-display">Rd</div>
             <div>
-              <div className="font-display font-bold text-sm tracking-tight">RdCloth</div>
-              <div className="text-[10px] uppercase tracking-widest text-muted-foreground">ERP · Demo</div>
+              <div className="font-display font-bold text-sm tracking-tight">{APP_CONFIG.shortName}</div>
+              <div className="text-[10px] uppercase tracking-widest text-muted-foreground">ERP · Small Business</div>
             </div>
           </div>
           <button className="lg:hidden" onClick={() => setOpen(false)} data-testid="sidebar-close"><X size={18}/></button>
@@ -106,7 +122,7 @@ export default function Layout({ children }) {
               className="w-full pl-9 pr-3 py-2 bg-stone-100 dark:bg-stone-900 border border-border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-neutral-900 dark:focus:ring-stone-100"
             />
             {searchResults.length > 0 && <div className="absolute top-full left-0 right-0 mt-1 z-30 rounded-md border border-border bg-card shadow-lg overflow-hidden">
-              {searchResults.map((result) => <button key={`${result.type}-${result.id}`} onClick={() => { setSearch(""); setSearchResults([]); }} className="block w-full text-left px-3 py-2 hover:bg-stone-100 dark:hover:bg-stone-900"><div className="text-sm font-semibold">{result.label}</div><div className="text-xs text-muted-foreground">{result.type} · {result.detail}</div></button>)}
+              {searchResults.map((result) => <button key={`${result.type}-${result.id}`} onClick={() => openSearchResult(result)} className="block w-full text-left px-3 py-2 hover:bg-stone-100 dark:hover:bg-stone-900"><div className="text-sm font-semibold">{result.label}</div><div className="text-xs text-muted-foreground">{result.type} · {result.detail}</div></button>)}
             </div>}
           </div>
           <button onClick={toggle} data-testid="theme-toggle" className="p-2 rounded-md hover:bg-stone-100 dark:hover:bg-stone-900">

@@ -87,7 +87,7 @@ class _SessionDatabase:
         return getattr(self._database, name)
 
 db = _SessionDatabase(client[DB_NAME])
-ATTACHMENTS_DIR = Path(os.environ.get("ATTACHMENTS_DIR", "D:/RdCloth"))
+ATTACHMENTS_DIR = Path(os.environ.get("ATTACHMENTS_DIR", "D:/NexaBiz"))
 ATTACHMENTS_DIR.mkdir(parents=True, exist_ok=True)
 
 @asynccontextmanager
@@ -111,7 +111,7 @@ def transactional(handler):
             return await handler(*args, **kwargs)
     return wrapped
 
-app = FastAPI(title="RdCloth ERP API")
+app = FastAPI(title="NexaBiz ERP API", description="Self-hosted ERP template for small businesses")
 api = APIRouter(prefix="/api")
 
 app.add_middleware(
@@ -166,7 +166,7 @@ DEFAULT_OWNER_PASSWORD = os.environ.get("OWNER_PASSWORD", "rdcloth2026")
 
 FALLBACK_USERS = {
     DEFAULT_OWNER_EMAIL: {
-        "id": "owner-demo", "email": DEFAULT_OWNER_EMAIL, "name": "RdCloth Owner", "role": "owner",
+        "id": "owner-demo", "email": DEFAULT_OWNER_EMAIL, "name": "NexaBiz Owner", "role": "owner",
         "password_hash": hash_password(DEFAULT_OWNER_PASSWORD),
     },
     "admin@rdcloth.id": {
@@ -611,6 +611,38 @@ async def create_po(body: Dict[str, Any], user: dict = Depends(require_module("p
     await audit(user, "create", "purchase_order", body["id"], None, body)
     body.pop("_id", None)
     return body
+
+@api.put("/purchase_orders/{po_id}")
+@transactional
+async def update_po(po_id: str, body: Dict[str, Any], user: dict = Depends(require_module("purchasing"))):
+    po = await db.purchase_orders.find_one({"id": po_id})
+    if not po:
+        raise HTTPException(404, "PO not found")
+    if po.get("received_status") == "received" or po.get("payment_status") == "paid":
+        raise HTTPException(400, "Only pending and unpaid purchase orders can be edited")
+    items = body.get("items", [])
+    if not items:
+        raise HTTPException(400, "At least one purchase item is required")
+    subtotal = 0.0
+    for item in items:
+        quantity = positive(item.get("quantity", 0), "Purchase quantity")
+        unit_cost = nonnegative(item.get("unit_cost", 0), "Unit cost")
+        subtotal += quantity * unit_cost
+    updated = {
+        "supplier_id": body.get("supplier_id", po.get("supplier_id")),
+        "account_id": body.get("account_id", po.get("account_id")),
+        "date": body.get("date", po.get("date")),
+        "items": items,
+        "discount": nonnegative(body.get("discount", 0), "Discount"),
+        "shipping": nonnegative(body.get("shipping", 0), "Shipping"),
+        "tax": nonnegative(body.get("tax", 0), "Tax"),
+        "subtotal": subtotal,
+        "total": subtotal - nonnegative(body.get("discount", 0), "Discount") + nonnegative(body.get("shipping", 0), "Shipping") + nonnegative(body.get("tax", 0), "Tax"),
+        "updated_at": now_iso(),
+    }
+    await db.purchase_orders.update_one({"id": po_id}, {"$set": updated})
+    await audit(user, "update", "purchase_order", po_id, po, {**po, **updated})
+    return {**po, **updated}
 
 @api.post("/purchase_orders/{po_id}/receive")
 @transactional
@@ -1146,7 +1178,8 @@ async def create_return(body: Dict[str, Any], user: dict = Depends(require_modul
 # ---------- ONBOARDING ----------
 class OnboardingIn(BaseModel):
     business_name: str
-    currency: str = "IDR"
+    currency: str = "USD"
+    locale: str = "en-US"
     initial_capital: float = 0
     account_name: str = "Kas Tunai"
 
@@ -1156,7 +1189,7 @@ async def complete_onboarding(body: OnboardingIn, user: dict = Depends(require_r
     # save business profile
     await db.settings_kv.update_one(
         {"id": "business_profile"},
-        {"$set": {"id": "business_profile", "business_name": body.business_name, "currency": body.currency, "setup_complete": True, "updated_at": now_iso()}},
+        {"$set": {"id": "business_profile", "business_name": body.business_name, "currency": body.currency, "locale": body.locale, "setup_complete": True, "updated_at": now_iso()}},
         upsert=True,
     )
     # if capital > 0, seed as owner_investment
@@ -1607,7 +1640,7 @@ async def seed_all():
     # owner user
     admin_email = os.environ.get("OWNER_EMAIL", DEFAULT_OWNER_EMAIL).lower()
     admin_password = os.environ.get("OWNER_PASSWORD", DEFAULT_OWNER_PASSWORD)
-    admin_name = os.environ.get("OWNER_NAME", "RdCloth Owner")
+    admin_name = os.environ.get("OWNER_NAME", "NexaBiz Owner")
     existing = await db.users.find_one({"email": admin_email})
     if not existing:
         await db.users.insert_one({
@@ -1708,7 +1741,7 @@ async def seed_all():
         {"id": mat_shirt_white, "name": "Kaos Polos Putih", "unit": "pcs", "stock": 50, "cost": 30000, "minimum_stock": 10, "supplier_id": sup_shirt, "created_at": now_iso()},
         {"id": mat_dtf, "name": "DTF Transfer A4", "unit": "pcs", "stock": 100, "cost": 15000, "minimum_stock": 20, "supplier_id": sup_dtf, "created_at": now_iso()},
         {"id": mat_pack, "name": "Packaging Box", "unit": "pcs", "stock": 200, "cost": 4000, "minimum_stock": 30, "supplier_id": sup_pack, "created_at": now_iso()},
-        {"id": mat_sticker, "name": "Sticker RdCloth", "unit": "pcs", "stock": 500, "cost": 1500, "minimum_stock": 50, "supplier_id": sup_pack, "created_at": now_iso()},
+        {"id": mat_sticker, "name": "Packaging Sticker", "unit": "pcs", "stock": 500, "cost": 1500, "minimum_stock": 50, "supplier_id": sup_pack, "created_at": now_iso()},
         {"id": mat_tag, "name": "Hang Tag", "unit": "pcs", "stock": 500, "cost": 500, "minimum_stock": 50, "supplier_id": sup_pack, "created_at": now_iso()},
         {"id": mat_card, "name": "Thank You Card", "unit": "pcs", "stock": 500, "cost": 500, "minimum_stock": 50, "supplier_id": sup_pack, "created_at": now_iso()},
         {"id": mat_tote, "name": "Totebag Canvas Polos", "unit": "pcs", "stock": 30, "cost": 25000, "minimum_stock": 5, "supplier_id": sup_shirt, "created_at": now_iso()},
@@ -1730,16 +1763,16 @@ async def seed_all():
         return arr
 
     products = [
-        {"id": new_id(), "sku": "RDB", "name": "RdBasic T-Shirt", "category_id": cat_shirt, "brand": "RdCloth", "material": "Cotton Combed 30s", "image_url": "https://images.pexels.com/photos/8532616/pexels-photo-8532616.jpeg",
+        {"id": new_id(), "sku": "NB-BASIC", "name": "Basic T-Shirt", "category_id": cat_shirt, "brand": "NexaBiz Demo", "material": "Cotton Combed 30s", "image_url": "https://images.pexels.com/photos/8532616/pexels-photo-8532616.jpeg",
          "cost": 54500, "selling_price": 89000, "minimum_stock": 3, "status": "active",
          "variants": variants("RDB", ["Black","White"], ["S","M","L","XL"], 54500, 89000, [8,12,10,5, 6,8,7,4])},
-        {"id": new_id(), "sku": "RDC", "name": "RdCustom T-Shirt", "category_id": cat_shirt, "brand": "RdCloth", "material": "Cotton Combed 30s", "image_url": "https://images.pexels.com/photos/12025472/pexels-photo-12025472.jpeg",
+        {"id": new_id(), "sku": "NB-CUSTOM", "name": "Custom T-Shirt", "category_id": cat_shirt, "brand": "NexaBiz Demo", "material": "Cotton Combed 30s", "image_url": "https://images.pexels.com/photos/12025472/pexels-photo-12025472.jpeg",
          "cost": 54500, "selling_price": 109000, "minimum_stock": 3, "status": "active",
          "variants": variants("RDC", ["Black","White"], ["S","M","L","XL"], 54500, 109000, [4,6,5,3, 3,5,4,2])},
-        {"id": new_id(), "sku": "RDT", "name": "RdTote Canvas", "category_id": cat_bag, "brand": "RdCloth", "material": "Canvas Blacu",  "image_url": "https://images.unsplash.com/photo-1544816155-12df9643f363",
+        {"id": new_id(), "sku": "NB-TOTE", "name": "Canvas Tote", "category_id": cat_bag, "brand": "NexaBiz Demo", "material": "Canvas",  "image_url": "https://images.unsplash.com/photo-1544816155-12df9643f363",
          "cost": 42000, "selling_price": 79000, "minimum_stock": 3, "status": "active",
          "variants": variants("RDT", ["Natural"], ["OS"], 42000, 79000, [15])},
-        {"id": new_id(), "sku": "RDP", "name": "RdCap Snapback", "category_id": cat_cap, "brand": "RdCloth", "material": "Twill",
+        {"id": new_id(), "sku": "NB-CAP", "name": "Snapback Cap", "category_id": cat_cap, "brand": "NexaBiz Demo", "material": "Twill",
          "cost": 47000, "selling_price": 95000, "minimum_stock": 2, "status": "active",
          "variants": variants("RDP", ["Black"], ["OS"], 47000, 95000, [8])},
     ]
@@ -1752,7 +1785,7 @@ async def seed_all():
         {"material_id": mat_shirt_black, "material_name": "Kaos Polos Hitam", "quantity": 1},
         {"material_id": mat_dtf, "material_name": "DTF Transfer", "quantity": 1},
         {"material_id": mat_pack, "material_name": "Packaging Box", "quantity": 1},
-        {"material_id": mat_sticker, "material_name": "Sticker RdCloth", "quantity": 1},
+        {"material_id": mat_sticker, "material_name": "Packaging Sticker", "quantity": 1},
         {"material_id": mat_tag, "material_name": "Hang Tag", "quantity": 1},
         {"material_id": mat_card, "material_name": "Thank You Card", "quantity": 1},
     ]
@@ -1838,6 +1871,6 @@ async def _shutdown():
 
 @api.get("/")
 async def root():
-    return {"app": "RdCloth ERP", "status": "ok"}
+    return {"app": "NexaBiz ERP", "status": "ok"}
 
 app.include_router(api)

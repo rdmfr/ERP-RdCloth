@@ -26,4 +26,3 @@ numpy>=1.26.0
 python-multipart>=0.0.9
 jq>=1.6.0
 typer>=0.9.0
-# emergentintegrations removed; this package is private and not required for local development.

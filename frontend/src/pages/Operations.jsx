@@ -6,6 +6,7 @@ import { toast } from "sonner";
 export function Purchasing() {
   const [rows, setRows] = useState([]);
   const [creating, setCreating] = useState(false);
+  const [editing, setEditing] = useState(null);
   const [paying, setPaying] = useState(null);
   const { rows: suppliers } = useCRUD("suppliers");
   const { rows: materials } = useCRUD("materials");
@@ -38,17 +39,27 @@ export function Purchasing() {
           { header:"Total", cell:r=><span className="font-bold">{fmtIDR(r.total)}</span> },
           { header:"Payment", cell:r=><StatusPill status={r.payment_status}/> },
           { header:"Received", cell:r=><StatusPill status={r.received_status}/> },
-          { header:"", cell:r=><div className="flex gap-2">{r.received_status!=="received" && <Button variant="outline" onClick={()=>receive(r.id)} data-testid={`receive-po-${r.id}`}>Receive</Button>}{r.received_status==="received" && r.payment_status!=="paid" && <Button variant="outline" onClick={()=>setPaying({id:r.id,account_id:accounts.find(a=>a.is_default)?.id||accounts[0]?.id||""})}>Bayar Hutang</Button>}</div> },
+          { header:"", cell:r=><div className="flex gap-2">{r.received_status!=="received" && r.payment_status!=="paid" && <Button variant="outline" onClick={()=>setEditing(r)}>Edit</Button>}{r.received_status!=="received" && <Button variant="outline" onClick={()=>receive(r.id)} data-testid={`receive-po-${r.id}`}>Receive</Button>}{r.received_status==="received" && r.payment_status!=="paid" && <Button variant="outline" onClick={()=>setPaying({id:r.id,account_id:accounts.find(a=>a.is_default)?.id||accounts[0]?.id||""})}>Bayar Hutang</Button>}</div> },
         ]}/>
       {creating && <POForm suppliers={suppliers} materials={materials} accounts={accounts} onClose={()=>setCreating(false)} onDone={()=>{ setCreating(false); reload(); }} />}
+      {editing && <POForm initial={editing} suppliers={suppliers} materials={materials} accounts={accounts} onClose={()=>setEditing(null)} onDone={()=>{ setEditing(null); reload(); }} />}
       {paying && <Modal open onClose={()=>setPaying(null)} title="Bayar Hutang Supplier"><Field label="Bayar dari akun"><Select value={paying.account_id} onChange={e=>setPaying({...paying,account_id:e.target.value})}>{accounts.map(a=><option key={a.id} value={a.id}>{a.name} ({fmtIDR(a.balance||0)})</option>)}</Select></Field><div className="flex justify-end gap-2 mt-6"><Button variant="outline" onClick={()=>setPaying(null)}>Batal</Button><Button onClick={pay}>Bayar</Button></div></Modal>}
     </div>
   );
 }
 
-function POForm({ suppliers, materials, accounts, onClose, onDone }) {
+function POForm({ initial, suppliers, materials, accounts, onClose, onDone }) {
   const defaultAccount = accounts.find(a=>a.is_default)?.id || accounts[0]?.id || "";
-  const [form, setForm] = useState({ supplier_id:"", account_id:defaultAccount, date: new Date().toISOString().slice(0,10), items:[], discount:0, shipping:0, tax:0, payment_status:"unpaid" });
+  const [form, setForm] = useState(() => initial ? {
+    supplier_id: initial.supplier_id || "",
+    account_id: initial.account_id || "",
+    date: (initial.date || "").slice(0, 10),
+    items: initial.items || [],
+    discount: initial.discount || 0,
+    shipping: initial.shipping || 0,
+    tax: initial.tax || 0,
+    payment_status: initial.payment_status || "unpaid",
+  } : { supplier_id:"", account_id:defaultAccount, date: new Date().toISOString().slice(0,10), items:[], discount:0, shipping:0, tax:0, payment_status:"unpaid" });
   const [row, setRow] = useState({ material_id:"", quantity:1, unit_cost:0 });
   const add = () => {
     const m = materials.find(x=>x.id===row.material_id); if (!m) return;
@@ -59,12 +70,21 @@ function POForm({ suppliers, materials, accounts, onClose, onDone }) {
   const total = subtotal - Number(form.discount) + Number(form.shipping) + Number(form.tax);
 
   const submit = async () => {
-    try { await api.post("/purchase_orders", { ...form, total }); toast.success("PO dibuat"); onDone(); }
+    try {
+      if (initial) {
+        await api.put(`/purchase_orders/${initial.id}`, { ...form, total });
+        toast.success("PO diperbarui");
+      } else {
+        await api.post("/purchase_orders", { ...form, total });
+        toast.success("PO dibuat");
+      }
+      onDone();
+    }
     catch (e) { toast.error(formatErr(e.response?.data?.detail)); }
   };
 
   return (
-    <Modal open onClose={onClose} title="Purchase Order Baru">
+    <Modal open onClose={onClose} title={initial ? "Edit Purchase Order" : "Purchase Order Baru"}>
       <div className="grid grid-cols-2 gap-4 mb-4">
         <Field label="Supplier">
           <Select value={form.supplier_id} onChange={e=>setForm({...form,supplier_id:e.target.value})} data-testid="po-supplier">
@@ -114,7 +134,7 @@ function POForm({ suppliers, materials, accounts, onClose, onDone }) {
         </div>
         <div className="flex gap-2">
           <Button variant="outline" onClick={onClose}>Batal</Button>
-          <Button onClick={submit} data-testid="btn-save-po">Simpan PO</Button>
+          <Button onClick={submit} data-testid="btn-save-po">{initial ? "Simpan Perubahan" : "Simpan PO"}</Button>
         </div>
       </div>
     </Modal>

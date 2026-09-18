@@ -131,7 +131,7 @@ webpackConfig.devServer = (devServerConfig) => {
 // Wrap with visual edits (automatically adds babel plugin, dev server, and overlay in dev mode)
 if (isDevServer) {
   try {
-    // Optional visual editing plugin has been removed for RdCloth. If you
+    // Optional visual editing plugin is not required for the template. If you
     // want a similar visual-editing feature, install and configure a
     // repository-specific plugin and require it here.
   } catch (err) {

@@ -3,6 +3,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useNavigate } from "react-router-dom";
 import { formatErr } from "@/lib/api";
 import { toast } from "sonner";
+import { APP_CONFIG } from "@/config/appConfig";
 
 export default function Login() {
   const { login } = useAuth();
@@ -30,11 +31,11 @@ export default function Login() {
       <div className="hidden lg:flex flex-col justify-between p-12 bg-neutral-900 text-white">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-md bg-white text-neutral-900 flex items-center justify-center font-black font-display">Rd</div>
-          <span className="font-display font-bold text-lg">RdCloth</span>
+          <span className="font-display font-bold text-lg">{APP_CONFIG.shortName}</span>
         </div>
         <div>
           <h1 className="font-display font-black text-5xl leading-none tracking-tighter mb-6">Business command center<br/>for apparel makers.</h1>
-          <p className="text-stone-400 max-w-md leading-relaxed">Kelola inventory, produksi, penjualan marketplace, HPP, dan laporan keuangan RdCloth dalam satu dashboard yang tenang dan cepat.</p>
+          <p className="text-stone-400 max-w-md leading-relaxed">{APP_CONFIG.tagline}</p>
         </div>
         <div className="text-xs uppercase tracking-widest text-stone-500">v1.0 · Phase 1 Release</div>
       </div>
@@ -42,8 +43,8 @@ export default function Login() {
         <form onSubmit={submit} className="w-full max-w-sm space-y-6" data-testid="login-form">
           <div>
             <div className="text-xs uppercase tracking-[0.25em] text-muted-foreground mb-2">Masuk</div>
-            <h2 className="font-display font-bold text-3xl tracking-tight">RdCloth ERP</h2>
-            <p className="text-sm text-muted-foreground mt-1">Gunakan email & password Anda.</p>
+            <h2 className="font-display font-bold text-3xl tracking-tight">{APP_CONFIG.name}</h2>
+            <p className="text-sm text-muted-foreground mt-1">Sign in to manage your business workspace.</p>
           </div>
           <div className="space-y-3">
             <div>

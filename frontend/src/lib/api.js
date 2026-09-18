@@ -1,4 +1,5 @@
 import axios from "axios";
+import { APP_CONFIG, getBusinessPreferences } from "@/config/appConfig";
 
 const backendUrl = process.env.REACT_APP_BACKEND_URL || "http://localhost:8000";
 const API = `${backendUrl}/api`;
@@ -24,14 +25,16 @@ api.interceptors.response.use(
   }
 );
 
-export const fmtIDR = (n) =>
-  new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 }).format(Number(n || 0));
+export const fmtIDR = (n) => {
+  const { locale, currency } = getBusinessPreferences();
+  return new Intl.NumberFormat(locale, { style: "currency", currency, maximumFractionDigits: 0 }).format(Number(n || 0));
+};
 
-export const fmtNum = (n) => new Intl.NumberFormat("id-ID").format(Number(n || 0));
+export const fmtNum = (n) => new Intl.NumberFormat(getBusinessPreferences().locale).format(Number(n || 0));
 
 export const fmtDate = (s) => {
   if (!s) return "-";
-  try { return new Date(s).toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric" }); }
+  try { return new Date(s).toLocaleDateString(getBusinessPreferences().locale, { day: "2-digit", month: "short", year: "numeric" }); }
   catch { return s; }
 };
 

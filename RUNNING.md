@@ -1,4 +1,4 @@
-RdCloth — Local Run Instructions
+NexaBiz ERP — Local Run Instructions
 
 Overview
 
@@ -59,7 +59,7 @@ Verify health:
 
 ```powershell
 curl http://127.0.0.1:8000/api/
-# expected: {"app":"RdCloth ERP","status":"ok"}
+# expected: {"app":"NexaBiz ERP","status":"ok"}
 ```
 
 Untuk memverifikasi bahwa backend benar-benar memakai Atlas, jalankan dari folder `backend`:
@@ -92,7 +92,7 @@ REACT_APP_BACKEND_URL=http://localhost:8000 yarn start
 
 Notes and troubleshooting
 
-- If you removed or changed any private packages (such as emergentintegrations previously), ensure `requirements.txt` and `package.json` reflect the correct set for your environment.
+- If you remove or change private packages, ensure `requirements.txt` and `package.json` reflect the correct set for your environment.
 - `.env` files should not be committed. Use `.env.example` as a template for collaborators.
 - To force a port when starting CRA, set `PORT=3001` in the environment before `yarn start`.
 

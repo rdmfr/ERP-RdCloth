@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { PageHeader, DataTable, Modal, Field, Input, Select, Button, StatusPill, useCRUD, Plus, Edit, Trash2 } from "./_shared";
 import { fmtIDR, fmtNum } from "@/lib/api";
+import { APP_CONFIG } from "@/config/appConfig";
 
 export default function Products() {
   const { rows, save, remove } = useCRUD("products");
@@ -40,7 +41,7 @@ export default function Products() {
 
 function ProductForm({ data, cats, onClose, onSave }) {
   const [form, setForm] = useState({
-    sku: "", name: "", category_id: "", brand: "RdCloth", material: "", cost: 0, selling_price: 0, minimum_stock: 3, status: "active", image_url: "",
+    sku: "", name: "", category_id: "", brand: APP_CONFIG.shortName, material: "", cost: 0, selling_price: 0, minimum_stock: 3, status: "active", image_url: "",
     ...data,
     variants: data.variants || [{ color:"", size:"", stock:0, cost:0, selling_price:0, sku:"" }],
   });

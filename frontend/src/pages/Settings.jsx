@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTheme } from "@/contexts/ThemeContext";
 import OnboardingWizard from "./OnboardingWizard";
+import { APP_CONFIG, getBusinessPreferences } from "@/config/appConfig";
 
 export default function Settings() {
   const { user } = useAuth();
@@ -61,7 +62,7 @@ export default function Settings() {
           </div>
           <div className="pt-3 border-t border-border">
             <div className="font-display font-bold mb-1">Business Profile</div>
-            <div className="text-sm text-muted-foreground">RdCloth · Apparel & Custom Printing · Currency: IDR</div>
+            <div className="text-sm text-muted-foreground">{APP_CONFIG.name} · Small Business Operations · Currency: {getBusinessPreferences().currency}</div>
           </div>
         </div>
       )}

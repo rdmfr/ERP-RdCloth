@@ -1,6 +1,6 @@
-# RdCloth ERP Documentation
+# NexaBiz ERP Documentation
 
-RdCloth ERP adalah aplikasi web untuk operasional bisnis apparel dan konveksi. Aplikasi mencakup katalog produk, stok bahan baku, produksi, pembelian, penjualan, marketplace import, keuangan, laporan, dan kalkulator bisnis.
+NexaBiz ERP adalah template self-hosted untuk operasional UMKM di Indonesia dan pasar global. Aplikasi mencakup katalog produk, inventory, produksi, pembelian, penjualan, marketplace import, keuangan, laporan, dan kalkulator bisnis.
 
 ## Quick Start
 
@@ -225,14 +225,14 @@ python -m pip check
 - Gunakan MongoDB transaction/session untuk sales, cancel sales, receive PO, production complete, dan marketplace import. Preflight validation sudah mencegah sebagian mutasi parsial, tetapi belum menggantikan transaction.
 - Endpoint transaksi utama sudah dibungkus MongoDB transaction; deployment wajib memakai MongoDB Atlas/replica set dan bukan MongoDB standalone.
 - Buat backup Atlas terjadwal, uji restore, dan tentukan retention policy.
-- Untuk deployment, pasang `ATTACHMENTS_DIR` pada persistent disk. Folder lokal `D:\RdCloth` tidak otomatis ikut berpindah saat deploy atau restart container.
+- Untuk deployment, pasang `ATTACHMENTS_DIR` pada persistent disk. Folder lokal tidak otomatis ikut berpindah saat deploy atau restart container.
 - Pastikan `SKIP_DEMO_SEED=1` setelah data awal dibuat.
 
 ### P1 - Wajib untuk operasional harian
 
 - Validasi numerik dan status transition harus konsisten di frontend dan backend. Validasi nominal finance, duplicate order number, dan material PO sudah diperketat di backend.
 - Search dan pagination tersedia pada tabel data; stock opname produk/bahan mencatat delta, movement, dan audit log; master data di-archive secara soft delete.
-- Lampiran dapat di-upload melalui Finance dan disimpan di `D:\RdCloth`, dengan metadata di MongoDB dan endpoint download terproteksi.
+- Lampiran dapat di-upload melalui Finance dan disimpan pada folder `ATTACHMENTS_DIR`, dengan metadata di MongoDB dan endpoint download terproteksi.
 - Cegah marketplace import duplikat berdasarkan `order_number` dan sediakan laporan item gagal.
 - Jangan melewati material PO yang tidak ditemukan secara diam-diam; proses harus gagal dengan alasan yang jelas.
 - Tambahkan pagination, filter tanggal/status, dan pencarian server-side untuk tabel besar.

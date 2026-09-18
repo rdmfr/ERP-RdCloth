@@ -1,12 +1,12 @@
-# RdCloth ERP
+# NexaBiz ERP
 
-Sistem ERP (Enterprise Resource Planning) berbasis web untuk manajemen operasional bisnis konveksi dan manufaktur pakaian (apparel). Sistem ini mencakup manajemen inventaris bahan baku, alur produksi, pencatatan pesanan penjualan (sales orders), pembelian (purchasing), hingga analisis keuangan.
+Self-hosted ERP template untuk UMKM dan small businesses di Indonesia maupun pasar global. NexaBiz membantu mengelola produk, inventory, purchasing, production, sales, marketplace, finance, reporting, dan pricing dalam satu workspace yang dapat dikonfigurasi per bisnis.
 
 ## Fitur Utama
 
-- **Dashboard & Analisis**: Ringkasan KPI bulanan, grafik pendapatan, produk terlaris, dan pengeluaran operasional.
+- **Dashboard & Analisis**: Ringkasan KPI, grafik pendapatan, produk terlaris, dan pengeluaran operasional.
 - **Manajemen Pengguna & Peran**: Akses berbasis peran (RBAC) untuk Owner, Admin, Tim Produksi, dan Tim Keuangan.
-- **Manajemen Produk & Stok**: Katalog produk, manajemen varian (ukuran & warna), SKU, dan alert level stok minimum.
+- **Manajemen Produk & Stok**: Katalog produk, varian, SKU, dan alert level stok minimum.
 - **Inventaris & Bahan Baku**: Pencatatan bahan baku (kain, benang, aksesoris) beserta log mutasi stok otomatis.
 - **Perintah Produksi (Production Orders)**: Tracking status produksi dari pemotongan hingga barang jadi, serta pemotongan otomatis stok bahan baku.
 - **Pembelian (Purchase Orders)**: Order pembelian bahan baku ke supplier dan konfirmasi penerimaan stok.

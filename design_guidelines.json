@@ -1,5 +1,5 @@
 {
-  "project_name": "RdCloth ERP",
+  "project_name": "NexaBiz ERP",
   "theme": "modern-minimalist-monochrome",
   "typography": {
     "heading_font": "Manrope",
@@ -118,7 +118,7 @@
     }
   },
   "instructions_to_main_agent": [
-    "You are building RdCloth, an ERP for apparel/custom printing.",
+    "You are building NexaBiz, a configurable ERP template for small businesses worldwide.",
     "Strictly follow the color palette: Avoid colorful gradients. Use a premium, clean, black/white/gray aesthetic with soft charcoal for dark mode.",
     "Ensure both Light Mode and Dark Mode are fully supported via Tailwind classes (dark: prefix).",
     "DO NOT apply global transitions like 'transition: all' in CSS. Use specific transitions (e.g., transition-colors) on interactive elements.",

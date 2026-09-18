@@ -1,7 +1,7 @@
-# RdCloth ERP — Product Requirements Document
+# NexaBiz ERP — Product Requirements Document
 
 ## Original Problem Statement
-User requested a mini ERP for **RdCloth** (apparel & custom printing UMKM) — 50-module spec including auth, dashboard, sales, orders, products+variants, inventory, purchasing, production+BOM, HPP calculator, pricing simulator, BEP, finance, P&L, assets, marketplace fees, audit log, notifications, settings. Currency IDR.
+The product is a self-hosted ERP template for **NexaBiz** customers, designed for Indonesian and global small businesses — 50-module spec including auth, dashboard, sales, orders, products+variants, inventory, purchasing, production+BOM, HPP calculator, pricing simulator, BEP, finance, P&L, assets, marketplace fees, audit log, notifications, settings. Currency, locale, timezone, and tax settings are configurable per business.
 
 ## Architecture
 - Backend: FastAPI + MongoDB (motor async), JWT auth, bcrypt password hashing
