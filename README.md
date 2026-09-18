@@ -14,7 +14,7 @@ Self-hosted ERP template untuk UMKM dan small businesses di Indonesia maupun pas
 - **Keuangan & Transaksi**: Pencatatan arus kas (pemasukan & pengeluaran) dan jurnal aktivitas operasional.
 - **Finance Suite**: Buku besar, jurnal umum, faktur, AP/AR, rekonsiliasi bank, laporan dasar, dan ringkasan pajak.
 - **Light CRM**: Segmen customer, nilai pelanggan, catatan interaksi, task, dan follow-up.
-- **Micro Business Mode**: Quick Sale, metode pembayaran, receipt print, cash-in/out harian, dan WhatsApp customer link.
+- **Micro Business Mode**: Quick Sale, metode pembayaran, PDF invoice, receipt print, cash-in/out harian, dan WhatsApp customer link.
 
 ## Why NexaBiz
 

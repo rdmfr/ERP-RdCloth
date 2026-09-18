@@ -33,6 +33,19 @@ export function Sales() {
       reload();
     } catch (e) { toast.error(formatErr(e.response?.data?.detail)); }
   };
+  const downloadInvoicePdf = async (row) => {
+    try {
+      const response = await api.get(`/sales_orders/${row.id}/pdf`, { responseType: "blob" });
+      const url = URL.createObjectURL(response.data);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `invoice-${row.order_number}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch (e) { toast.error(formatErr(e.response?.data?.detail)); }
+  };
 
   return (
     <div>
@@ -57,6 +70,7 @@ export function Sales() {
           { header:"Payment", cell:r=><StatusPill status={r.payment_status}/> },
           { header:"Fulfillment", cell:r=><StatusPill status={r.fulfillment_status}/> },
           { header:"", cell:r=><div className="flex gap-2">
+            <button onClick={()=>downloadInvoicePdf(r)} className="text-xs text-emerald-600 hover:underline font-semibold">PDF</button>
             <button onClick={()=>printReceipt(r)} className="text-xs text-blue-600 hover:underline font-semibold">Receipt</button>
             {r.fulfillment_status!=="cancelled" && <button onClick={()=>cancel(r.id)} data-testid={`cancel-sale-${r.id}`} className="text-xs text-rose-600 hover:underline font-semibold">Cancel</button>}
             {r.payment_status==="paid" && r.fulfillment_status!=="cancelled" && <button onClick={()=>refund(r)} className="text-xs text-amber-600 hover:underline font-semibold">Refund</button>}

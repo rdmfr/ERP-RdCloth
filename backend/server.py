@@ -18,7 +18,8 @@ from datetime import datetime, timezone, timedelta
 from typing import List, Optional, Any, Dict
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, Request, Response, status, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
+import io
 from pydantic import BaseModel, Field, EmailStr, ConfigDict
 from motor.motor_asyncio import AsyncIOMotorClient
 from bson import ObjectId
@@ -818,6 +819,106 @@ async def get_marketplace_fixed_fees(channel: str) -> dict:
 @api.get("/sales_orders", dependencies=[Depends(require_module("sales"))])
 async def list_sales():
     return await db.sales_orders.find({}, {"_id": 0}).sort("created_at", -1).to_list(1000)
+
+@api.get("/sales_orders/{sid}/pdf")
+async def sales_order_pdf(sid: str, user: dict = Depends(require_module("sales"))):
+    sales_order = await db.sales_orders.find_one({"id": sid}, {"_id": 0})
+    if not sales_order:
+        raise HTTPException(404, "Order not found")
+    profile = await db.settings_kv.find_one({"id": "business_profile"}, {"_id": 0}) or {}
+
+    try:
+        from reportlab.lib import colors
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib.units import mm
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+    except ImportError as exc:
+        raise HTTPException(503, "PDF dependency is not installed") from exc
+
+    buffer = io.BytesIO()
+    document = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        rightMargin=18 * mm,
+        leftMargin=18 * mm,
+        topMargin=16 * mm,
+        bottomMargin=16 * mm,
+    )
+    styles = getSampleStyleSheet()
+    styles.add(ParagraphStyle(name="SmallMuted", parent=styles["Normal"], fontSize=8, textColor=colors.HexColor("#64748b")))
+    styles.add(ParagraphStyle(name="InvoiceTitle", parent=styles["Heading1"], fontSize=20, leading=24, spaceAfter=4))
+    styles.add(ParagraphStyle(name="Right", parent=styles["Normal"], alignment=2))
+
+    business_name = profile.get("business_name") or profile.get("name") or "NexaBiz Business"
+    business_address = profile.get("address") or profile.get("business_address") or ""
+    business_phone = profile.get("phone") or ""
+    business_email = profile.get("email") or ""
+    tax_name = profile.get("tax_name") or "Tax"
+    currency = profile.get("currency") or "IDR"
+    locale = profile.get("locale") or "en-US"
+
+    def money(value):
+        try:
+            return f"{currency} {float(value or 0):,.0f}"
+        except (TypeError, ValueError):
+            return f"{currency} 0"
+
+    def safe(value):
+        return str(value or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+    customer = safe(sales_order.get("customer_name") or "Guest")
+    order_number = safe(sales_order.get("order_number") or sid)
+    date_value = safe(str(sales_order.get("date") or "")[:10])
+    story = [
+        [Paragraph(f"<b>{safe(business_name)}</b><br/>{safe(business_address)}<br/>{safe(business_phone)} {safe(business_email)}", styles["Normal"]),
+         Paragraph("<b>SALES INVOICE</b>", styles["Right"])],
+        [Paragraph(f"<font size='8'>Customer: {customer}<br/>Invoice: {order_number}<br/>Date: {date_value}</font>", styles["SmallMuted"]), ""],
+        [Spacer(1, 6)],
+    ]
+    header = [Paragraph("<b>Item</b>", styles["Normal"]), Paragraph("<b>Qty</b>", styles["Right"]), Paragraph("<b>Unit price</b>", styles["Right"]), Paragraph("<b>Amount</b>", styles["Right"])]
+    rows = [header]
+    for item in sales_order.get("items") or []:
+        quantity = float(item.get("quantity") or 0)
+        unit_price = float(item.get("selling_price") or 0)
+        rows.append([
+            Paragraph(safe(item.get("product_name") or item.get("variant_sku") or "Item"), styles["Normal"]),
+            Paragraph(f"{quantity:g}", styles["Right"]),
+            Paragraph(money(unit_price), styles["Right"]),
+            Paragraph(money(quantity * unit_price), styles["Right"]),
+        ])
+    table = Table(rows, colWidths=[85 * mm, 18 * mm, 38 * mm, 38 * mm], repeatRows=1)
+    table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f1f5f9")),
+        ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#cbd5e1")),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 6),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+        ("TOPPADDING", (0, 0), (-1, -1), 6),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+    ]))
+    story.extend([table, Spacer(1, 10)])
+    summary = [
+        ["Subtotal", money(sales_order.get("subtotal"))],
+        ["Discount", f"- {money(sales_order.get('discount'))}"],
+        ["Shipping", money(sales_order.get("shipping"))],
+        [tax_name, money(sales_order.get("tax"))],
+        ["Total", money(sales_order.get("total"))],
+        ["Payment", safe(sales_order.get("payment_method") or sales_order.get("payment_status") or "-")],
+    ]
+    summary_table = Table([[Paragraph(f"<b>{safe(label)}</b>" if label == "Total" else safe(label), styles["Normal"]),
+                            Paragraph(f"<b>{value}</b>" if label == "Total" else value, styles["Right"])] for label, value in summary], colWidths=[141 * mm, 38 * mm])
+    summary_table.setStyle(TableStyle([
+        ("ALIGN", (1, 0), (1, -1), "RIGHT"),
+        ("LINEABOVE", (0, 4), (-1, 4), 0.8, colors.HexColor("#0f172a")),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+    ]))
+    story.extend([summary_table, Spacer(1, 14), Paragraph("Thank you for your business.", styles["SmallMuted"])])
+    document.build(story)
+    buffer.seek(0)
+    filename = f"invoice-{sales_order.get('order_number') or sid}.pdf"
+    return StreamingResponse(buffer, media_type="application/pdf", headers={"Content-Disposition": f'attachment; filename="{filename}"'})
 
 @api.post("/sales_orders")
 @transactional

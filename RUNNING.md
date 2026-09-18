@@ -158,9 +158,13 @@ attachment volumes. Back up first with the scripts below.
 
 For daily operations, use **Quick Sale** instead of the full Sales Order form. It
 records the product, quantity, payment method, and stock movement in one short flow.
-Use **Receipt** from the Sales list to print a customer receipt. The Dashboard shows
+Use **PDF** from the Sales list to download a professional invoice, or use **Receipt**
+to print a lightweight customer receipt. The Dashboard shows
 today's cash in, cash out, net cash, and total account balance. The Light CRM page
 links customer phone numbers to WhatsApp and shows recent order history.
+
+PDF invoices use the `reportlab` backend dependency and include the configured business
+profile, customer, order items, discount, shipping, tax, total, and payment method.
 
 ## Backup and restore
 
