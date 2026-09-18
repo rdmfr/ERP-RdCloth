@@ -131,7 +131,11 @@ Copy-Item .env.docker.example .env
 
 Open `http://localhost` after the health checks complete. To stop the services:
 
-```powershell
+```
+
+The Docker frontend uses the same-origin `/api` proxy automatically. Do not set
+`REACT_APP_BACKEND_URL` to `http://localhost:8000` for the Docker deployment; that
+address would point to the buyer's browser machine rather than the backend container.powershell
 .\scripts\stop.ps1
 ```
 

@@ -107,6 +107,9 @@ The bundled Compose stack starts MongoDB, FastAPI, and the React/Nginx frontend 
 `http://localhost`. Persistent MongoDB and attachment volumes are created automatically.
 Use `.\scripts\stop.ps1` to stop the stack without deleting data.
 
+The production frontend calls the backend through the same-origin `/api` proxy, so
+the Docker deployment also works when installed on a VPS or custom domain.
+
 ---
 
 ## Demo Configuration

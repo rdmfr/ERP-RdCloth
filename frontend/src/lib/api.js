@@ -1,8 +1,11 @@
 import axios from "axios";
 import { APP_CONFIG, getBusinessPreferences } from "@/config/appConfig";
 
-const backendUrl = process.env.REACT_APP_BACKEND_URL || "http://localhost:8000";
-const API = `${backendUrl}/api`;
+// An empty backend URL means same-origin, which is required for the Docker/Nginx
+// deployment. Local development can still provide an explicit backend origin.
+const configuredBackendUrl = (process.env.REACT_APP_BACKEND_URL || "").trim();
+const backendUrl = configuredBackendUrl || window.location.origin;
+const API = `${backendUrl.replace(/\/$/, "")}/api`;
 
 export const api = axios.create({ baseURL: API });
 
