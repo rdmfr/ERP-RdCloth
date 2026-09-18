@@ -386,6 +386,8 @@ def collection_crud(name: str, module: str):
         if name == "materials" and purchase_payment_status == "paid":
             purchase_amount = nonnegative(body.get("stock", 0), "Initial stock") * nonnegative(body.get("cost", 0), "Material cost")
         await coll.insert_one(body)
+        if name in {"invoices", "bills"} and float(body.get("amount", 0)) > 0:
+            await create_document_journal(user, name, body)
         if name == "materials" and purchase_amount > 0:
             await create_financial_transaction(
                 user, "expense", purchase_amount, purchase_account_id,
@@ -1055,6 +1057,32 @@ async def create_financial_transaction(user, ttype, amount, account_id, descript
 async def get_default_account_id():
     acc = await db.accounts.find_one({"is_default": True}) or await db.accounts.find_one({})
     return acc["id"] if acc else None
+
+async def create_document_journal(user, document_type, document):
+    """Post the accrual entry for an invoice or vendor bill once."""
+    if await db.journal_entries.find_one({"source_type": document_type, "source_id": document["id"]}):
+        return
+    amount = positive(document.get("amount", 0), "Document amount")
+    cash_kind = "receivable" if document_type == "invoices" else "expense"
+    offset_kind = "revenue" if document_type == "invoices" else "payable"
+    debit_account = await db.accounts.find_one({"kind": cash_kind})
+    credit_account = await db.accounts.find_one({"kind": offset_kind})
+    if document_type == "bills" and not credit_account:
+        credit_account = await db.accounts.find_one({"kind": "liability"})
+    if not debit_account or not credit_account:
+        # Existing installations may not have the optional chart accounts yet.
+        return
+    lines = [
+        {"account_id": debit_account["id"], "description": document.get("party_name", ""), "debit": amount if document_type == "invoices" else 0, "credit": amount if document_type == "bills" else 0},
+        {"account_id": credit_account["id"], "description": document.get("description", ""), "debit": amount if document_type == "bills" else 0, "credit": amount if document_type == "invoices" else 0},
+    ]
+    await db.journal_entries.insert_one({
+        "id": new_id(), "date": document.get("date") or now_iso(),
+        "reference": document.get("number", document["id"]),
+        "description": f"{'Invoice' if document_type == 'invoices' else 'Bill'} {document.get('number', document['id'])}",
+        "lines": lines, "total": amount, "source_type": document_type,
+        "source_id": document["id"], "created_by": user["id"], "created_at": now_iso(),
+    })
 
 @api.get("/financial_transactions", dependencies=[Depends(require_module("finance"))])
 async def list_txns():
@@ -2066,6 +2094,9 @@ async def seed_all():
         {"name": "E-Wallet DANA", "kind": "wallet", "balance": 0},
         {"name": "GoPay", "kind": "wallet", "balance": 0},
         {"name": "Hutang", "kind": "liability", "balance": 0},
+        {"name": "Piutang Usaha", "kind": "receivable", "balance": 0},
+        {"name": "Pendapatan Penjualan", "kind": "revenue", "balance": 0},
+        {"name": "Beban Pembelian", "kind": "expense", "balance": 0},
         {"name": "Shopee Balance", "kind": "marketplace", "balance": 0},
     ]
     account_index = {}
