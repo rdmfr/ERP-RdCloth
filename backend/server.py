@@ -1188,6 +1188,111 @@ async def refund_sale(sid: str, body: Dict[str, Any], user: dict = Depends(requi
     await audit(user, "refund", "sales_order", sid, so, {"amount": amount})
     return {"ok": True, "amount": amount}
 
+# ---------- CSV IMPORT ----------
+
+def _coerce_float(value: Any, default: float = 0.0) -> float:
+    try:
+        if value is None or value == "":
+            return default
+        return float(str(value).replace(",", "").replace("%", ""))
+    except Exception:
+        return default
+
+
+@api.post("/imports/csv")
+async def import_csv_rows(body: Dict[str, Any], user: dict = Depends(require_module("dashboard"))):
+    kind = str(body.get("kind", "")).lower()
+    rows = body.get("rows") or []
+    if not rows:
+        raise HTTPException(400, "CSV import rows are empty")
+    created = 0
+    skipped = []
+
+    if kind == "products":
+        for row in rows:
+            name = str(row.get("name") or row.get("product_name") or "").strip()
+            sku = str(row.get("sku") or row.get("product_sku") or row.get("variant_sku") or "").strip()
+            if not name:
+                skipped.append({"row": row, "reason": "Missing product name"})
+                continue
+            product = await db.products.find_one({"name": name})
+            if product:
+                skipped.append({"name": name, "reason": "Product already exists"})
+                continue
+            variant_sku = sku or f"SKU-{new_id()[:6]}"
+            variant = {
+                "sku": variant_sku,
+                "color": str(row.get("color") or "").strip(),
+                "size": str(row.get("size") or "").strip(),
+                "stock": _coerce_float(row.get("stock"), 0),
+                "cost": _coerce_float(row.get("cost"), 0),
+                "selling_price": _coerce_float(row.get("selling_price"), 0),
+            }
+            doc = {
+                "id": new_id(),
+                "sku": sku or variant_sku,
+                "name": name,
+                "brand": str(row.get("brand") or "").strip(),
+                "category_id": str(row.get("category_id") or "").strip(),
+                "status": "active",
+                "minimum_stock": _coerce_float(row.get("minimum_stock"), 0),
+                "cost": _coerce_float(row.get("cost"), 0),
+                "selling_price": _coerce_float(row.get("selling_price"), 0),
+                "variants": [variant],
+                "created_at": now_iso(),
+                "updated_at": now_iso(),
+            }
+            await db.products.insert_one(doc)
+            created += 1
+    elif kind in {"customers", "suppliers"}:
+        for row in rows:
+            name = str(row.get("name") or row.get("customer_name") or row.get("supplier_name") or "").strip()
+            if not name:
+                skipped.append({"row": row, "reason": "Missing name"})
+                continue
+            email = str(row.get("email") or "").strip()
+            phone = str(row.get("phone") or row.get("contact") or "").strip()
+            doc = {
+                "id": new_id(),
+                "name": name,
+                "email": email,
+                "phone": phone,
+                "address": str(row.get("address") or "").strip(),
+                "customer_type": str(row.get("segment") or row.get("customer_type") or "new").strip() or "new",
+                "total_orders": 0,
+                "total_spending": 0,
+                "created_at": now_iso(),
+                "updated_at": now_iso(),
+            }
+            if kind == "suppliers":
+                doc = {
+                    "id": new_id(),
+                    "name": name,
+                    "contact_name": str(row.get("contact_name") or "").strip(),
+                    "phone": phone,
+                    "email": email,
+                    "address": str(row.get("address") or "").strip(),
+                    "created_at": now_iso(),
+                    "updated_at": now_iso(),
+                }
+            if kind == "customers":
+                existing = await db.customers.find_one({"$or": [{"email": email}, {"phone": phone}, {"name": name}]}) if email or phone else await db.customers.find_one({"name": name})
+                if existing:
+                    skipped.append({"name": name, "reason": "Customer already exists"})
+                    continue
+                await db.customers.insert_one(doc)
+            else:
+                existing = await db.suppliers.find_one({"$or": [{"email": email}, {"phone": phone}, {"name": name}]}) if email or phone else await db.suppliers.find_one({"name": name})
+                if existing:
+                    skipped.append({"name": name, "reason": "Supplier already exists"})
+                    continue
+                await db.suppliers.insert_one(doc)
+            created += 1
+    else:
+        raise HTTPException(400, f"Unsupported import type: {kind}")
+
+    return {"ok": True, "created": created, "skipped": skipped, "kind": kind}
+
 # ---------- MARKETPLACE ORDER IMPORT ----------
 class ImportOrderIn(BaseModel):
     order_number: Optional[str] = None

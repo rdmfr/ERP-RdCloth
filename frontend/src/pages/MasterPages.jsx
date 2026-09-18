@@ -194,14 +194,37 @@ export function Inventory() {
 
 // Generic master data page
 export function MasterDataPage({ endpoint, title, subtitle, fields }) {
-  const { rows, save, remove } = useCRUD(endpoint);
+  const { rows, save, remove, reload } = useCRUD(endpoint);
   const [editing, setEditing] = useState(null);
+  const [csvOpen, setCsvOpen] = useState(false);
+  const [csvText, setCsvText] = useState("");
   const emptyForm = Object.fromEntries(fields.map(f=>[f.key, f.type==="number"?0:""]));
+
+  const importCsv = async () => {
+    try {
+      const parsed = parseCsvText(csvText);
+      if (!parsed.length) {
+        toast.error("CSV masih kosong");
+        return;
+      }
+      const kind = endpoint === "customers" ? "customers" : endpoint === "suppliers" ? "suppliers" : "products";
+      const response = await api.post("/imports/csv", { kind, rows: parsed });
+      toast.success(`Import selesai: ${response.data.created} data ditambahkan`);
+      setCsvOpen(false);
+      setCsvText("");
+      reload();
+    } catch (e) {
+      toast.error(formatErr(e.response?.data?.detail || e.message));
+    }
+  };
 
   return (
     <div>
       <PageHeader title={title} subtitle={subtitle} action={
-        <Button onClick={()=>setEditing(emptyForm)} data-testid={`btn-new-${endpoint}`}><Plus size={14} className="inline mr-1"/> Tambah</Button>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={() => setCsvOpen(true)} data-testid={`btn-import-${endpoint}`}>Import CSV</Button>
+          <Button onClick={()=>setEditing(emptyForm)} data-testid={`btn-new-${endpoint}`}><Plus size={14} className="inline mr-1"/> Tambah</Button>
+        </div>
       }/>
       <DataTable
         testid={`${endpoint}-table`}
@@ -236,8 +259,58 @@ export function MasterDataPage({ endpoint, title, subtitle, fields }) {
           <Button onClick={async()=>{ if (await save(editing, editing.id)) setEditing(null); }} data-testid={`btn-save-${endpoint}`}>Simpan</Button>
         </div>
       </Modal>}
+      {csvOpen && (
+        <Modal open onClose={() => setCsvOpen(false)} title={`Import ${title} CSV`}>
+          <div className="space-y-3">
+            <p className="text-sm text-muted-foreground">Header yang didukung: name, email, phone, address, customer_type, segment, stock, cost, selling_price</p>
+            <textarea value={csvText} onChange={(event) => setCsvText(event.target.value)} rows={10} className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm" placeholder="name,email,phone,address,customer_type\nRina,rina@email.com,0812...,Jl. Merdeka,VIP" />
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setCsvOpen(false)}>Batal</Button>
+              <Button onClick={importCsv}>Import</Button>
+            </div>
+          </div>
+        </Modal>
+      )}
     </div>
   );
+}
+
+function parseCsvText(csvText) {
+  const lines = csvText.split(/\r?\n/).filter((line) => line.trim());
+  if (!lines.length) return [];
+  const headers = splitCsvLine(lines[0]).map((header) => header.trim().toLowerCase());
+  return lines.slice(1).map((line) => {
+    const values = splitCsvLine(line);
+    const row = {};
+    headers.forEach((header, index) => {
+      row[header] = values[index] !== undefined ? values[index].trim() : "";
+    });
+    return row;
+  });
+}
+
+function splitCsvLine(line) {
+  const result = [];
+  let current = "";
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i += 1) {
+    const ch = line[i];
+    if (ch === '"') {
+      if (inQuotes && line[i + 1] === '"') {
+        current += '"';
+        i += 1;
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if (ch === "," && !inQuotes) {
+      result.push(current);
+      current = "";
+    } else {
+      current += ch;
+    }
+  }
+  result.push(current);
+  return result;
 }
 
 export function Suppliers() {

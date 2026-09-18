@@ -70,10 +70,22 @@ export function Sales() {
 
 function printReceipt(row) {
   const lines = (row.items || []).map(item => `<tr><td>${item.product_name || item.variant_sku}</td><td>${item.quantity}</td><td>${fmtIDR(item.selling_price)}</td></tr>`).join("");
+  const html = `<html><head><title>Receipt ${row.order_number}</title><style>body{font-family:Arial;padding:24px}table{width:100%;border-collapse:collapse}td{padding:6px 0;border-bottom:1px solid #ddd}.total{font-size:18px;font-weight:bold;text-align:right;margin-top:16px}</style></head><body><h2>NexaBiz Receipt</h2><p>${row.order_number}<br>${fmtDate(row.date)}<br>${row.customer_name || "Guest"}</p><table>${lines}</table><div class="total">Total: ${fmtIDR(row.total)}</div><p>Payment: ${row.payment_method || row.payment_status}</p></body></html>`;
+  const blob = new Blob([html], { type: "text/html" });
+  const url = URL.createObjectURL(blob);
+  const downloadLink = document.createElement("a");
+  downloadLink.href = url;
+  downloadLink.download = `receipt-${row.order_number}.html`;
+  document.body.appendChild(downloadLink);
+  downloadLink.click();
+  document.body.removeChild(downloadLink);
+  URL.revokeObjectURL(url);
+
   const popup = window.open("", "_blank", "width=420,height=650");
   if (!popup) return;
-  popup.document.write(`<html><head><title>Receipt ${row.order_number}</title><style>body{font-family:Arial;padding:24px}table{width:100%;border-collapse:collapse}td{padding:6px 0;border-bottom:1px solid #ddd}.total{font-size:18px;font-weight:bold;text-align:right;margin-top:16px}</style></head><body><h2>NexaBiz Receipt</h2><p>${row.order_number}<br>${fmtDate(row.date)}<br>${row.customer_name || "Guest"}</p><table>${lines}</table><div class="total">Total: ${fmtIDR(row.total)}</div><p>Payment: ${row.payment_method || row.payment_status}</p><script>window.print()</script></body></html>`);
+  popup.document.write(html);
   popup.document.close();
+  setTimeout(() => popup.focus(), 100);
 }
 
 function SalesForm({ products, customers, marketplaces, onClose, onDone, quick = false }) {

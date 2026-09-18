@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
-import { api, fmtIDR, fmtNum } from "@/lib/api";
+import { api, fmtIDR, fmtNum, formatErr } from "@/lib/api";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell, Legend } from "recharts";
 import { TrendingUp, TrendingDown, DollarSign, ShoppingBag, Wallet, Boxes, AlertTriangle, Activity } from "lucide-react";
+import { Modal, Field, Input, Select, Button } from "./_shared";
+import { toast } from "sonner";
 
 const PERIODS = [{k:"today",l:"Hari Ini"},{k:"week",l:"Minggu"},{k:"month",l:"Bulan"},{k:"year",l:"Tahun"}];
 const COLORS = ["#059669","#0284c7","#d97706","#dc2626","#7c3aed","#0891b2"];
@@ -35,12 +37,47 @@ export default function Dashboard() {
   const [kpi, setKpi] = useState(null);
   const [charts, setCharts] = useState(null);
   const [cashflow, setCashflow] = useState(null);
+  const [showQuickExpense, setShowQuickExpense] = useState(false);
+  const [accounts, setAccounts] = useState([]);
+  const [expenseCategories, setExpenseCategories] = useState([]);
+  const [expenseForm, setExpenseForm] = useState({
+    category: "operasional",
+    description: "",
+    amount: 0,
+    date: new Date().toISOString().slice(0, 10),
+    account_id: "",
+  });
 
   useEffect(() => {
     api.get(`/dashboard/kpi?period=${period}`).then(r => setKpi(r.data));
     api.get(`/dashboard/charts`).then(r => setCharts(r.data));
     api.get("/dashboard/cashflow").then(r => setCashflow(r.data));
+    api.get("/accounts").then(r => setAccounts(r.data));
+    api.get("/expense_categories").then(r => setExpenseCategories(r.data));
   }, [period]);
+
+  const submitQuickExpense = async () => {
+    try {
+      await api.post("/expenses", {
+        ...expenseForm,
+        amount: Number(expenseForm.amount || 0),
+        account_id: expenseForm.account_id || accounts.find(a => a.is_default)?.id || "",
+      });
+      toast.success("Biaya cepat berhasil dicatat");
+      setShowQuickExpense(false);
+      setExpenseForm({
+        category: "operasional",
+        description: "",
+        amount: 0,
+        date: new Date().toISOString().slice(0, 10),
+        account_id: accounts.find(a => a.is_default)?.id || "",
+      });
+      api.get("/dashboard/cashflow").then(r => setCashflow(r.data));
+      api.get(`/dashboard/kpi?period=${period}`).then(r => setKpi(r.data));
+    } catch (e) {
+      toast.error(formatErr(e.response?.data?.detail));
+    }
+  };
 
   if (!kpi) return <div className="text-muted-foreground">Memuat dashboard...</div>;
 
@@ -59,11 +96,14 @@ export default function Dashboard() {
             </span>
           </div>
         </div>
-        <div className="flex bg-stone-100 dark:bg-stone-900 rounded-md p-1" data-testid="period-selector">
-          {PERIODS.map(p => (
-            <button key={p.k} onClick={() => setPeriod(p.k)} data-testid={`period-${p.k}`}
-              className={`px-3 py-1.5 text-xs font-semibold rounded transition-colors ${period===p.k?"bg-neutral-900 text-white dark:bg-stone-100 dark:text-stone-900":"text-muted-foreground hover:text-foreground"}`}>{p.l}</button>
-          ))}
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="outline" onClick={() => setShowQuickExpense(true)}>Quick Expense</Button>
+          <div className="flex bg-stone-100 dark:bg-stone-900 rounded-md p-1" data-testid="period-selector">
+            {PERIODS.map(p => (
+              <button key={p.k} onClick={() => setPeriod(p.k)} data-testid={`period-${p.k}`}
+                className={`px-3 py-1.5 text-xs font-semibold rounded transition-colors ${period===p.k?"bg-neutral-900 text-white dark:bg-stone-100 dark:text-stone-900":"text-muted-foreground hover:text-foreground"}`}>{p.l}</button>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -155,6 +195,35 @@ export default function Dashboard() {
           </div>
         </div>
       </div>
+
+      {showQuickExpense && (
+        <Modal open onClose={() => setShowQuickExpense(false)} title="Quick Expense">
+          <div className="space-y-3">
+            <Field label="Kategori">
+              <Select value={expenseForm.category} onChange={(event) => setExpenseForm({ ...expenseForm, category: event.target.value })}>
+                {(expenseCategories.length ? expenseCategories : [{ id: "operasional", name: "Operasional" }, { id: "marketing", name: "Marketing" }, { id: "sewa", name: "Sewa" }, { id: "gaji", name: "Gaji" }]).map((item) => (
+                  <option key={item.id || item.name} value={item.id || item.name}>{item.name}</option>
+                ))}
+              </Select>
+            </Field>
+            <Field label="Deskripsi"><Input value={expenseForm.description} onChange={(event) => setExpenseForm({ ...expenseForm, description: event.target.value })} /></Field>
+            <Field label="Jumlah"><Input type="number" value={expenseForm.amount} onChange={(event) => setExpenseForm({ ...expenseForm, amount: event.target.value })} /></Field>
+            <Field label="Tanggal"><Input type="date" value={expenseForm.date} onChange={(event) => setExpenseForm({ ...expenseForm, date: event.target.value })} /></Field>
+            <Field label="Akun">
+              <Select value={expenseForm.account_id} onChange={(event) => setExpenseForm({ ...expenseForm, account_id: event.target.value })}>
+                <option value="">-- Pilih akun --</option>
+                {accounts.map((account) => (
+                  <option key={account.id} value={account.id}>{account.name}</option>
+                ))}
+              </Select>
+            </Field>
+            <div className="flex justify-end gap-2 pt-2">
+              <Button variant="outline" onClick={() => setShowQuickExpense(false)}>Batal</Button>
+              <Button onClick={submitQuickExpense}>Simpan</Button>
+            </div>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }

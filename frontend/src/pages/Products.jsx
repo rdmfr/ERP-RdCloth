@@ -1,19 +1,42 @@
 import { useState } from "react";
 import { PageHeader, DataTable, Modal, Field, Input, Select, Button, StatusPill, useCRUD, Plus, Edit, Trash2 } from "./_shared";
-import { fmtIDR, fmtNum } from "@/lib/api";
+import { api, fmtIDR, fmtNum, formatErr } from "@/lib/api";
 import { APP_CONFIG } from "@/config/appConfig";
+import { toast } from "sonner";
 
 export default function Products() {
-  const { rows, save, remove } = useCRUD("products");
+  const { rows, save, remove, reload } = useCRUD("products");
   const { rows: cats } = useCRUD("categories");
   const [editing, setEditing] = useState(null);
+  const [csvOpen, setCsvOpen] = useState(false);
+  const [csvText, setCsvText] = useState("");
 
   const openNew = () => setEditing({ variants: [{ color:"Black", size:"M", stock:0, cost:0, selling_price:0, sku:"" }] });
+
+  const importCsv = async () => {
+    try {
+      const parsed = parseCsvText(csvText);
+      if (!parsed.length) {
+        toast.error("CSV masih kosong");
+        return;
+      }
+      const response = await api.post("/imports/csv", { kind: "products", rows: parsed });
+      toast.success(`Import selesai: ${response.data.created} produk ditambahkan`);
+      setCsvOpen(false);
+      setCsvText("");
+      reload();
+    } catch (e) {
+      toast.error(formatErr(e.response?.data?.detail || e.message));
+    }
+  };
 
   return (
     <div>
       <PageHeader title="Products" subtitle="Katalog produk" action={
-        <Button onClick={openNew} data-testid="btn-new-product"><Plus size={14} className="inline mr-1"/> Produk Baru</Button>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={() => setCsvOpen(true)} data-testid="btn-import-products">Import CSV</Button>
+          <Button onClick={openNew} data-testid="btn-new-product"><Plus size={14} className="inline mr-1"/> Produk Baru</Button>
+        </div>
       }/>
       <DataTable
         testid="products-table"
@@ -35,8 +58,58 @@ export default function Products() {
         rows={rows}
       />
       {editing && <ProductForm data={editing} cats={cats} onClose={() => setEditing(null)} onSave={async (d) => { const ok = await save(d, editing.id); if (ok) setEditing(null); }} />}
+      {csvOpen && (
+        <Modal open onClose={() => setCsvOpen(false)} title="Import Produk CSV">
+          <div className="space-y-3">
+            <p className="text-sm text-muted-foreground">Gunakan header: name, sku, brand, color, size, stock, cost, selling_price, minimum_stock</p>
+            <textarea value={csvText} onChange={(event) => setCsvText(event.target.value)} rows={10} className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm" placeholder="name,sku,color,size,stock,cost,selling_price\nKaos Polos,KAOS-001,Black,M,20,25000,55000" />
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setCsvOpen(false)}>Batal</Button>
+              <Button onClick={importCsv}>Import</Button>
+            </div>
+          </div>
+        </Modal>
+      )}
     </div>
   );
+}
+
+function parseCsvText(csvText) {
+  const lines = csvText.split(/\r?\n/).filter((line) => line.trim());
+  if (!lines.length) return [];
+  const headers = splitCsvLine(lines[0]).map((header) => header.trim().toLowerCase());
+  return lines.slice(1).map((line) => {
+    const values = splitCsvLine(line);
+    const row = {};
+    headers.forEach((header, index) => {
+      row[header] = values[index] !== undefined ? values[index].trim() : "";
+    });
+    return row;
+  });
+}
+
+function splitCsvLine(line) {
+  const result = [];
+  let current = "";
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i += 1) {
+    const ch = line[i];
+    if (ch === '"') {
+      if (inQuotes && line[i + 1] === '"') {
+        current += '"';
+        i += 1;
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if (ch === "," && !inQuotes) {
+      result.push(current);
+      current = "";
+    } else {
+      current += ch;
+    }
+  }
+  result.push(current);
+  return result;
 }
 
 function ProductForm({ data, cats, onClose, onSave }) {
