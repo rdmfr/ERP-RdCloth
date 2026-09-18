@@ -8,6 +8,7 @@ import { APP_CONFIG } from "@/config/appConfig";
 export function Sales() {
   const [rows, setRows] = useState([]);
   const [creating, setCreating] = useState(false);
+  const [quickSale, setQuickSale] = useState(false);
   const { rows: products } = useCRUD("products");
   const { rows: customers } = useCRUD("customers");
   const { rows: marketplaces } = useCRUD("marketplaces");
@@ -38,6 +39,7 @@ export function Sales() {
       <PageHeader title="Sales Orders" subtitle="Penjualan & channel" action={
         <div className="flex gap-2">
           <Button variant="outline" onClick={() => downloadCSV("/reports/export/sales", "sales_export.csv")} data-testid="btn-export-sales">Export CSV</Button>
+          <Button variant="outline" onClick={()=>setQuickSale(true)} data-testid="btn-quick-sale"><Plus size={14} className="inline mr-1"/> Quick Sale</Button>
           <Button onClick={()=>setCreating(true)} data-testid="btn-new-sale"><Plus size={14} className="inline mr-1"/> Order Baru</Button>
         </div>
       }/>
@@ -55,20 +57,30 @@ export function Sales() {
           { header:"Payment", cell:r=><StatusPill status={r.payment_status}/> },
           { header:"Fulfillment", cell:r=><StatusPill status={r.fulfillment_status}/> },
           { header:"", cell:r=><div className="flex gap-2">
+            <button onClick={()=>printReceipt(r)} className="text-xs text-blue-600 hover:underline font-semibold">Receipt</button>
             {r.fulfillment_status!=="cancelled" && <button onClick={()=>cancel(r.id)} data-testid={`cancel-sale-${r.id}`} className="text-xs text-rose-600 hover:underline font-semibold">Cancel</button>}
             {r.payment_status==="paid" && r.fulfillment_status!=="cancelled" && <button onClick={()=>refund(r)} className="text-xs text-amber-600 hover:underline font-semibold">Refund</button>}
           </div>},
         ]}/>
       {creating && <SalesForm products={products} customers={customers} marketplaces={marketplaces} onClose={()=>setCreating(false)} onDone={()=>{ setCreating(false); reload(); }} />}
+      {quickSale && <SalesForm quick products={products} customers={customers} marketplaces={marketplaces} onClose={()=>setQuickSale(false)} onDone={()=>{ setQuickSale(false); reload(); }} />}
     </div>
   );
 }
 
-function SalesForm({ products, customers, marketplaces, onClose, onDone }) {
+function printReceipt(row) {
+  const lines = (row.items || []).map(item => `<tr><td>${item.product_name || item.variant_sku}</td><td>${item.quantity}</td><td>${fmtIDR(item.selling_price)}</td></tr>`).join("");
+  const popup = window.open("", "_blank", "width=420,height=650");
+  if (!popup) return;
+  popup.document.write(`<html><head><title>Receipt ${row.order_number}</title><style>body{font-family:Arial;padding:24px}table{width:100%;border-collapse:collapse}td{padding:6px 0;border-bottom:1px solid #ddd}.total{font-size:18px;font-weight:bold;text-align:right;margin-top:16px}</style></head><body><h2>NexaBiz Receipt</h2><p>${row.order_number}<br>${fmtDate(row.date)}<br>${row.customer_name || "Guest"}</p><table>${lines}</table><div class="total">Total: ${fmtIDR(row.total)}</div><p>Payment: ${row.payment_method || row.payment_status}</p><script>window.print()</script></body></html>`);
+  popup.document.close();
+}
+
+function SalesForm({ products, customers, marketplaces, onClose, onDone, quick = false }) {
   const [form, setForm] = useState({
     customer_id:"", customer_name:"", sales_channel:"Direct/Offline", items:[],
     discount:0, voucher:0, shipping:0, other_fee:0, advertising_cost:0, live_video_fee_pct:0, affiliate_fee_pct:0, return_rate_pct:0,
-    payment_status:"paid", fulfillment_status:"processing", date:new Date().toISOString(),
+    payment_status:"paid", payment_method:"cash", fulfillment_status:"processing", date:new Date().toISOString(),
   });
   const [row, setRow] = useState({ product_id:"", variant_sku:"", quantity:1, selling_price:0 });
   const selP = products.find(p=>p.id===row.product_id);
@@ -100,6 +112,7 @@ function SalesForm({ products, customers, marketplaces, onClose, onDone }) {
       const cust = customers.find(c=>c.id===form.customer_id);
       await api.post("/sales_orders", {
         ...form,
+        payment_status: form.payment_method === "credit" ? "unpaid" : form.payment_status,
         customer_name: cust?.name || form.customer_name || "Guest",
       });
       toast.success("Order dibuat & stok berkurang");
@@ -108,12 +121,17 @@ function SalesForm({ products, customers, marketplaces, onClose, onDone }) {
   };
 
   return (
-    <Modal open onClose={onClose} title="Sales Order Baru">
+    <Modal open onClose={onClose} title={quick ? "Quick Sale" : "Sales Order Baru"}>
       <div className="grid grid-cols-2 gap-4 mb-4">
         <Field label="Customer">
           <Select value={form.customer_id} onChange={e=>setForm({...form,customer_id:e.target.value})} data-testid="sale-customer">
             <option value="">-- Guest --</option>
             {customers.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}
+          </Select>
+        </Field>
+        <Field label="Payment method">
+          <Select value={form.payment_method} onChange={e=>setForm({...form,payment_method:e.target.value})}>
+            <option value="cash">Cash</option><option value="bank_transfer">Bank transfer</option><option value="qris">QRIS</option><option value="e_wallet">E-wallet</option><option value="credit">Credit / Piutang</option>
           </Select>
         </Field>
         <Field label="Channel">
@@ -123,7 +141,8 @@ function SalesForm({ products, customers, marketplaces, onClose, onDone }) {
         </Field>
       </div>
 
-      <div className="text-[10px] uppercase font-bold tracking-widest text-muted-foreground mb-2">Items</div>
+      {!quick && <div className="text-[10px] uppercase font-bold tracking-widest text-muted-foreground mb-2">Items</div>}
+      {quick && <div className="mb-2 text-sm text-muted-foreground">Tambahkan produk, jumlah, dan metode pembayaran. Stok akan langsung berkurang.</div>}
       <div className="grid grid-cols-[1fr_1fr_80px_120px_auto] gap-2 items-end mb-2">
         <Field label="Product">
           <Select value={row.product_id} onChange={e=>setRow({...row,product_id:e.target.value,variant_sku:""})}>
@@ -154,7 +173,7 @@ function SalesForm({ products, customers, marketplaces, onClose, onDone }) {
         ))}
       </div>
 
-      <div className="grid grid-cols-3 gap-3 mt-4">
+      {!quick && <div className="grid grid-cols-3 gap-3 mt-4">
         <Field label="Discount"><Input type="number" value={form.discount} onChange={e=>setForm({...form,discount:e.target.value})}/></Field>
         <Field label="Voucher"><Input type="number" value={form.voucher} onChange={e=>setForm({...form,voucher:e.target.value})}/></Field>
         <Field label="Shipping"><Input type="number" value={form.shipping} onChange={e=>setForm({...form,shipping:e.target.value})}/></Field>
@@ -172,7 +191,7 @@ function SalesForm({ products, customers, marketplaces, onClose, onDone }) {
             <option value="processing">Processing</option><option value="shipped">Shipped</option><option value="completed">Completed</option>
           </Select>
         </Field>
-      </div>
+      </div>}
 
       <div className="mt-4 pt-4 border-t border-border space-y-1 text-sm">
         <div className="flex justify-between"><span className="text-muted-foreground">Subtotal</span><span>{fmtIDR(subtotal)}</span></div>

@@ -39,6 +39,9 @@ Built for UMKM, online sellers, workshops, small manufacturers, and growing team
 - Onboarding wizard for business identity and opening balances
 - Configurable currency and regional formatting
 - Demo seed data for a faster evaluation
+- Quick Sale mode with cash, transfer, QRIS, e-wallet, and credit payment options
+- Printable receipt and owner-friendly daily cashflow cards
+- Light CRM customer history and WhatsApp contact shortcut
 
 ## Buyer expectations
 

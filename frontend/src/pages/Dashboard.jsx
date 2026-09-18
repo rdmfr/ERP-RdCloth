@@ -34,10 +34,12 @@ export default function Dashboard() {
   const [period, setPeriod] = useState("month");
   const [kpi, setKpi] = useState(null);
   const [charts, setCharts] = useState(null);
+  const [cashflow, setCashflow] = useState(null);
 
   useEffect(() => {
     api.get(`/dashboard/kpi?period=${period}`).then(r => setKpi(r.data));
     api.get(`/dashboard/charts`).then(r => setCharts(r.data));
+    api.get("/dashboard/cashflow").then(r => setCashflow(r.data));
   }, [period]);
 
   if (!kpi) return <div className="text-muted-foreground">Memuat dashboard...</div>;
@@ -77,6 +79,12 @@ export default function Dashboard() {
         <KPI label="Inventory Value" value={fmtIDR(kpi.inventory_value)} icon={Boxes} testid="kpi-inventory-value" />
         <KPI label="Low Stock" value={fmtNum(kpi.low_stock_count)} icon={AlertTriangle} tone={kpi.low_stock_count>0?"danger":"neutral"} testid="kpi-low-stock" />
       </div>
+      {cashflow && <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <KPI label="Cash In Today" value={fmtIDR(cashflow.cash_in)} icon={TrendingUp} tone="success" />
+        <KPI label="Cash Out Today" value={fmtIDR(cashflow.cash_out)} icon={TrendingDown} tone="danger" />
+        <KPI label="Net Cash Today" value={fmtIDR(cashflow.net)} icon={Wallet} tone={cashflow.net >= 0 ? "success" : "danger"} />
+        <KPI label="All Account Balance" value={fmtIDR(cashflow.balance)} icon={Wallet} />
+      </div>}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="lg:col-span-2 p-5 rounded-lg border border-border bg-card">

@@ -1069,6 +1069,16 @@ async def crm_summary(user: dict = Depends(require_module("crm"))):
     return {"customers": customers, "activities": activities,
             "total_customers": len(customers), "open_followups": len([x for x in activities if x.get("status") != "completed"])}
 
+@api.get("/dashboard/cashflow")
+async def dashboard_cashflow(user: dict = Depends(require_module("dashboard"))):
+    today = datetime.now(timezone.utc).date().isoformat()
+    transactions = await db.financial_transactions.find({"date": {"$gte": today}}, {"_id": 0}).to_list(5000)
+    cash_in = sum(float(x.get("amount", 0)) for x in transactions if x.get("type") in {"income", "owner_investment"})
+    cash_out = sum(float(x.get("amount", 0)) for x in transactions if x.get("type") in {"expense", "owner_withdrawal"})
+    accounts = await db.accounts.find({}, {"_id": 0, "name": 1, "balance": 1, "kind": 1}).to_list(100)
+    return {"date": today, "cash_in": cash_in, "cash_out": cash_out, "net": cash_in - cash_out,
+            "balance": sum(float(x.get("balance", 0)) for x in accounts), "accounts": accounts}
+
 # ---------- EXPENSES ----------
 @api.get("/expenses", dependencies=[Depends(require_module("finance"))])
 async def list_expenses():

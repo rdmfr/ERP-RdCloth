@@ -124,6 +124,14 @@ If you want, I can also add a small `docker-compose.yml` later to simplify local
 - Schedule database and attachment backups, then perform a restore test.
 - Rotate credentials and dependencies regularly.
 
+## Micro business quick start
+
+For daily operations, use **Quick Sale** instead of the full Sales Order form. It
+records the product, quantity, payment method, and stock movement in one short flow.
+Use **Receipt** from the Sales list to print a customer receipt. The Dashboard shows
+today's cash in, cash out, net cash, and total account balance. The Light CRM page
+links customer phone numbers to WhatsApp and shows recent order history.
+
 ## Backup and restore
 
 Install MongoDB Database Tools, set `MONGO_URL`, `DB_NAME`, and `ATTACHMENTS_DIR`,
