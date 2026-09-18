@@ -24,6 +24,7 @@ need more than a spreadsheet but are not ready for a complex enterprise suite.
 - Configure the business name, locale, currency, and regional number/date format during setup.
 - Keep sales, purchasing, inventory, production, finance, and reports in one workspace.
 - Start with local development or deploy to your own server, VPS, or cloud account.
+- Run the complete stack with Docker Compose using MongoDB, persistent attachments, and an Nginx reverse proxy.
 - Adapt the same foundation to retail, services, wholesale, custom products, workshops, and light manufacturing.
 
 ### Product listing copy
@@ -92,6 +93,19 @@ REACT_APP_BACKEND_URL=http://localhost:8000 yarn start
 ```
 
 Aplikasi frontend akan terbuka di `http://localhost:3000`.
+
+### 3. Self-hosted Docker deployment
+
+For the fastest production-style installation, copy `.env.docker.example` to `.env`,
+set a strong `JWT_SECRET` and `OWNER_PASSWORD`, then run:
+
+```powershell
+.\scripts\install.ps1
+```
+
+The bundled Compose stack starts MongoDB, FastAPI, and the React/Nginx frontend at
+`http://localhost`. Persistent MongoDB and attachment volumes are created automatically.
+Use `.\scripts\stop.ps1` to stop the stack without deleting data.
 
 ---
 

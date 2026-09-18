@@ -1,0 +1,59 @@
+services:
+  mongo:
+    image: mongo:7
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_DATABASE: ${DB_NAME:-nexabiz}
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD-SHELL", "mongosh --quiet --eval 'db.adminCommand({ ping: 1 }).ok' | grep 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    restart: unless-stopped
+    environment:
+      MONGO_URL: mongodb://mongo:27017
+      DB_NAME: ${DB_NAME:-nexabiz}
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env}
+      OWNER_EMAIL: ${OWNER_EMAIL:-owner@example.com}
+      OWNER_PASSWORD: ${OWNER_PASSWORD:?Set OWNER_PASSWORD in .env}
+      OWNER_NAME: ${OWNER_NAME:-Business Owner}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost}
+      ENVIRONMENT: ${ENVIRONMENT:-production}
+      DEMO_MODE: ${DEMO_MODE:-false}
+      MAX_ATTACHMENT_SIZE_MB: ${MAX_ATTACHMENT_SIZE_MB:-10}
+      ATTACHMENTS_DIR: /app/data/attachments
+      USE_MOCK_DB: "false"
+    volumes:
+      - attachments_data:/app/data/attachments
+    depends_on:
+      mongo:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+      args:
+        REACT_APP_BACKEND_URL: ""
+    restart: unless-stopped
+    ports:
+      - "${PORT:-80}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+
+volumes:
+  mongo_data:
+  attachments_data:

@@ -111,7 +111,33 @@ cd D:\Project\RD-ERP-main\backend; .venv\Scripts\Activate.ps1; python -m uvicorn
 cd D:\Project\RD-ERP-main\frontend; $env:REACT_APP_BACKEND_URL='http://localhost:8000'; yarn start
 ```
 
-If you want, I can also add a small `docker-compose.yml` later to simplify local setup.
+## Docker self-hosted deployment
+
+This repository includes a production-style Docker Compose stack:
+
+- MongoDB 7 with a persistent named volume
+- FastAPI backend with persistent attachment storage
+- React production build served by Nginx
+- Same-origin `/api` reverse proxy
+- Container health checks and startup ordering
+
+From the repository root:
+
+```powershell
+Copy-Item .env.docker.example .env
+# Edit .env and set JWT_SECRET and OWNER_PASSWORD
+.\scripts\install.ps1
+```
+
+Open `http://localhost` after the health checks complete. To stop the services:
+
+```powershell
+.\scripts\stop.ps1
+```
+
+To remove containers but keep data, use `docker compose down`. Do not use
+`docker compose down -v` unless you intentionally want to delete the MongoDB and
+attachment volumes. Back up first with the scripts below.
 
 ## Production security checklist
 
