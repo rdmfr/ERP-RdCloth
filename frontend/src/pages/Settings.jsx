@@ -26,13 +26,15 @@ export default function Settings() {
   const [auditDetail, setAuditDetail] = useState(null);
   const [profile, setProfile] = useState({ business_name:"", currency:"USD", locale:"en-US", timezone:"UTC", tax_enabled:false, tax_name:"Tax", tax_rate:0, tax_inclusive:false });
   const [savingProfile, setSavingProfile] = useState(false);
+  const [backupStatus, setBackupStatus] = useState(null);
 
   useEffect(() => { if (user?.role === "owner") api.get("/audit_logs").then(r=>setAudit(r.data)); }, [user]);
   useEffect(() => { api.get("/settings/business-profile").then(r=>setProfile(p=>({...p,...r.data}))).catch(()=>{}); }, []);
+  useEffect(() => { if (user?.role === "owner") api.get("/settings/backup-status").then(r=>setBackupStatus(r.data)).catch(()=>{}); }, [user]);
 
   const tabs = [
     ["general","General"],["categories","Categories"],["marketplaces","Marketplaces"],["expense_categories","Expense Categories"],
-    ...(user?.role==="owner"?[["users","Users"],["audit","Audit Log"]]:[]),
+    ...(user?.role==="owner"?[["users","Users"],["audit","Audit Log"],["backup","Backup"]]:[]),
   ];
 
   const createUser = async () => {
@@ -141,6 +143,21 @@ export default function Settings() {
             {header:"Entity",cell:r=>r.entity},
             {header:"Detail",cell:r=><Button variant="outline" onClick={()=>setAuditDetail(r)}>Lihat</Button>},
           ]}/>
+      )}
+      {tab==="backup" && user?.role==="owner" && (
+        <div className="p-6 rounded-lg border border-border bg-card space-y-4">
+          <div>
+            <div className="font-display font-bold text-lg">Backup status</div>
+            <div className="text-sm text-muted-foreground">Backup database dan attachment untuk pemulihan bisnis.</div>
+          </div>
+          {backupStatus?.warning && <div className="p-3 rounded-md bg-amber-100 text-amber-900 text-sm">{backupStatus.warning}</div>}
+          <div className="grid md:grid-cols-3 gap-3">
+            <div><div className="text-xs text-muted-foreground">Latest backup</div><div className="font-semibold">{backupStatus?.latest || "Belum ada"}</div></div>
+            <div><div className="text-xs text-muted-foreground">Created</div><div className="font-semibold">{backupStatus?.latest_at ? fmtDate(backupStatus.latest_at) : "-"}</div></div>
+            <div><div className="text-xs text-muted-foreground">Total backups</div><div className="font-semibold">{backupStatus?.backup_count || 0}</div></div>
+          </div>
+          <div className="text-sm text-muted-foreground">Jalankan <code>scripts/backup.ps1</code> secara berkala. Uji restore di lingkungan terpisah sebelum mengandalkan backup untuk produksi.</div>
+        </div>
       )}
       {auditDetail && <Modal open onClose={()=>setAuditDetail(null)} title="Detail Audit">
         <div className="space-y-3 text-sm"><div><b>Aksi:</b> {auditDetail.action}</div><div><b>Entity:</b> {auditDetail.entity}</div><div><b>Sebelum:</b><pre className="mt-1 p-3 rounded bg-stone-100 dark:bg-stone-900 overflow-auto text-xs">{JSON.stringify(auditDetail.old_value, null, 2)}</pre></div><div><b>Sesudah:</b><pre className="mt-1 p-3 rounded bg-stone-100 dark:bg-stone-900 overflow-auto text-xs">{JSON.stringify(auditDetail.new_value, null, 2)}</pre></div></div>

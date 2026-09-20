@@ -93,6 +93,7 @@ class _SessionDatabase:
 db = _SessionDatabase(client[DB_NAME])
 ATTACHMENTS_DIR = Path(os.environ.get("ATTACHMENTS_DIR", "D:/NexaBiz"))
 ATTACHMENTS_DIR.mkdir(parents=True, exist_ok=True)
+BACKUPS_DIR = Path(os.environ.get("BACKUPS_DIR", str(ATTACHMENTS_DIR.parent / "backups")))
 
 @asynccontextmanager
 async def mongo_transaction():
@@ -1664,6 +1665,18 @@ async def onboarding_status(user: dict = Depends(get_current_user)):
 async def get_business_profile(user: dict = Depends(get_current_user)):
     doc = await db.settings_kv.find_one({"id": "business_profile"}, {"_id": 0})
     return doc or {"business_name": "NexaBiz Business", "currency": "USD", "locale": "en-US", "timezone": "UTC", "tax_enabled": False, "tax_name": "Tax", "tax_rate": 0, "tax_inclusive": False}
+
+@api.get("/settings/backup-status")
+async def backup_status(user: dict = Depends(require_role("owner"))):
+    if not BACKUPS_DIR.exists():
+        return {"available": False, "backup_count": 0, "latest": None, "warning": "No backup has been created yet."}
+    candidates = [item for item in BACKUPS_DIR.iterdir() if item.is_dir()]
+    candidates.sort(key=lambda item: item.stat().st_mtime, reverse=True)
+    latest = candidates[0] if candidates else None
+    latest_at = datetime.fromtimestamp(latest.stat().st_mtime, timezone.utc).isoformat() if latest else None
+    age_hours = ((datetime.now(timezone.utc) - datetime.fromtimestamp(latest.stat().st_mtime, timezone.utc)).total_seconds() / 3600) if latest else None
+    warning = None if age_hours is not None and age_hours <= 24 else "Backup is older than 24 hours."
+    return {"available": bool(latest), "backup_count": len(candidates), "latest": latest.name if latest else None, "latest_at": latest_at, "age_hours": round(age_hours, 1) if age_hours is not None else None, "warning": warning}
 
 @api.put("/settings/business-profile")
 @transactional

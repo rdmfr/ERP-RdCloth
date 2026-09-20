@@ -10,4 +10,9 @@ New-Item -ItemType Directory -Force -Path $target | Out-Null
 if (-not $MongoUrl) { throw "Set MONGO_URL before running backup." }
 mongodump --uri $MongoUrl --db $Database --out (Join-Path $target "mongo")
 if (Test-Path $Attachments) { Copy-Item $Attachments (Join-Path $target "attachments") -Recurse }
+@{
+  created_at = (Get-Date).ToUniversalTime().ToString("o")
+  database = $Database
+  includes_attachments = (Test-Path $Attachments)
+} | ConvertTo-Json | Set-Content (Join-Path $target "manifest.json")
 Write-Output "Backup created at $target"
