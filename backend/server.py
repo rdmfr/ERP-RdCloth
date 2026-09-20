@@ -298,7 +298,46 @@ async def download_attachment(attachment_id: str, user: dict = Depends(get_curre
         raise HTTPException(404, "Attachment file not found")
     return FileResponse(target, media_type=attachment.get("content_type"), filename=attachment.get("original_name", target.name))
 
-# ---------- AUTH ----------
+# ---------- AUTH & SECURITY HARDENING ----------
+MAX_LOGIN_ATTEMPTS = 5
+LOCKOUT_MINUTES = 15
+
+def validate_password_strength(password: str) -> None:
+    if not password or len(password) < 8:
+        raise HTTPException(400, "Password minimal harus 8 karakter.")
+    if not any(c.isdigit() for c in password):
+        raise HTTPException(400, "Password harus mengandung minimal satu angka (0-9).")
+    if not any(c.isalpha() for c in password):
+        raise HTTPException(400, "Password harus mengandung minimal satu huruf (a-z, A-Z).")
+
+async def check_login_rate_limit(email: str, ip: str) -> None:
+    cutoff = (datetime.now(timezone.utc) - timedelta(minutes=LOCKOUT_MINUTES)).isoformat()
+    attempts = await db.login_attempts.count_documents({
+        "$or": [{"email": email}, {"ip": ip}],
+        "timestamp": {"$gte": cutoff},
+        "success": False
+    })
+    if attempts >= MAX_LOGIN_ATTEMPTS:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"Terlalu banyak percobaan login gagal. Akun/IP terkunci sementara selama {LOCKOUT_MINUTES} menit."
+        )
+
+async def record_login_attempt(email: str, ip: str, success: bool) -> None:
+    doc = {
+        "id": new_id(),
+        "email": email,
+        "ip": ip,
+        "success": success,
+        "timestamp": now_iso()
+    }
+    await db.login_attempts.insert_one(doc)
+    if success:
+        await db.login_attempts.delete_many({
+            "$or": [{"email": email}, {"ip": ip}],
+            "success": False
+        })
+
 class LoginIn(BaseModel):
     email: EmailStr
     password: str
@@ -306,6 +345,13 @@ class LoginIn(BaseModel):
 @api.post("/auth/login")
 async def login(body: LoginIn, response: Response, request: Request):
     email = body.email.lower()
+    client_ip = request.client.host if request.client else "127.0.0.1"
+    forwarded_for = request.headers.get("x-forwarded-for")
+    if forwarded_for:
+        client_ip = forwarded_for.split(",")[0].strip()
+        
+    await check_login_rate_limit(email, client_ip)
+    
     try:
         user = await db.users.find_one({"email": email})
     except Exception:
@@ -315,14 +361,29 @@ async def login(body: LoginIn, response: Response, request: Request):
         user = FALLBACK_USERS.get(email)
 
     if not user or not verify_password(body.password, user["password_hash"]):
-        raise HTTPException(401, "Invalid email or password")
+        await record_login_attempt(email, client_ip, success=False)
+        await audit({"id": "system", "email": email, "role": "anonymous"}, "login_failed", "auth", email, None, {"ip": client_ip, "reason": "Invalid credentials"})
+        raise HTTPException(401, "Email atau password salah")
+
+    if user.get("status") in ("inactive", "archived", "disabled"):
+        await record_login_attempt(email, client_ip, success=False)
+        raise HTTPException(403, "Akun Anda telah dinonaktifkan. Silakan hubungi Administrator.")
+
+    await record_login_attempt(email, client_ip, success=True)
+    await audit({"id": user["id"], "email": user["email"], "role": user["role"]}, "login_success", "auth", user["id"], None, {"ip": client_ip})
 
     token = create_token(user["id"], user["email"], user["role"])
     secure_cookie = request.url.scheme == "https"
     response.set_cookie("access_token", token, httponly=True, secure=secure_cookie, samesite="none", max_age=604800, path="/")
     return {
         "token": token,
-        "user": {"id": user["id"], "email": user["email"], "name": user["name"], "role": user["role"]},
+        "user": {
+            "id": user["id"],
+            "email": user["email"],
+            "name": user["name"],
+            "role": user["role"],
+            "status": user.get("status", "active"),
+        },
     }
 
 @api.post("/auth/logout")
@@ -334,7 +395,24 @@ async def logout(response: Response, user: dict = Depends(get_current_user)):
 async def me(user: dict = Depends(get_current_user)):
     return user
 
-# ---------- USERS ----------
+class ChangePasswordIn(BaseModel):
+    current_password: str
+    new_password: str
+
+@api.post("/auth/change-password")
+async def change_password(body: ChangePasswordIn, user: dict = Depends(get_current_user)):
+    db_user = await db.users.find_one({"id": user["id"]})
+    if not db_user:
+        raise HTTPException(404, "User tidak ditemukan")
+    if not verify_password(body.current_password, db_user["password_hash"]):
+        raise HTTPException(400, "Password saat ini tidak cocok")
+    validate_password_strength(body.new_password)
+    new_hash = hash_password(body.new_password)
+    await db.users.update_one({"id": user["id"]}, {"$set": {"password_hash": new_hash, "updated_at": now_iso()}})
+    await audit(user, "change_password", "user", user["id"], None, {"email": user["email"]})
+    return {"ok": True, "message": "Password berhasil diubah"}
+
+# ---------- USERS & ROLE MANAGEMENT ----------
 class UserCreate(BaseModel):
     email: EmailStr
     password: str
@@ -343,22 +421,85 @@ class UserCreate(BaseModel):
 
 @api.get("/users", dependencies=[Depends(require_role("owner"))])
 async def list_users():
-    return await db.users.find({}, {"_id": 0, "password_hash": 0}).to_list(500)
+    return await db.users.find({"status": {"$ne": "archived"}}, {"_id": 0, "password_hash": 0}).sort("created_at", -1).to_list(500)
 
 @api.post("/users", dependencies=[Depends(require_role("owner"))])
 async def create_user(body: UserCreate, user: dict = Depends(get_current_user)):
     if body.role not in ROLE_MODULES:
-        raise HTTPException(400, "Invalid role")
+        raise HTTPException(400, "Role tidak valid")
+    validate_password_strength(body.password)
     if await db.users.find_one({"email": body.email.lower()}):
-        raise HTTPException(400, "Email already exists")
+        raise HTTPException(400, "Email sudah terdaftar")
     doc = {
         "id": new_id(), "email": body.email.lower(), "password_hash": hash_password(body.password),
-        "name": body.name, "role": body.role, "created_at": now_iso(),
+        "name": body.name, "role": body.role, "status": "active", "created_at": now_iso(), "updated_at": now_iso(),
     }
     await db.users.insert_one(doc)
     await audit(user, "create", "user", doc["id"], None, {"email": doc["email"], "role": doc["role"]})
     doc.pop("_id", None); doc.pop("password_hash", None)
     return doc
+
+class UserUpdate(BaseModel):
+    name: Optional[str] = None
+    role: Optional[str] = None
+    status: Optional[str] = None # active / inactive
+
+@api.put("/users/{user_id}", dependencies=[Depends(require_role("owner"))])
+async def update_user(user_id: str, body: UserUpdate, user: dict = Depends(get_current_user)):
+    existing = await db.users.find_one({"id": user_id})
+    if not existing:
+        raise HTTPException(404, "User tidak ditemukan")
+    if body.role and body.role not in ROLE_MODULES:
+        raise HTTPException(400, "Role tidak valid")
+    if existing["role"] == "owner" and body.role and body.role != "owner":
+        other_owners = await db.users.count_documents({"role": "owner", "id": {"$ne": user_id}, "status": {"$ne": "archived"}})
+        if other_owners == 0:
+            raise HTTPException(400, "Sistem harus memiliki minimal satu akun Owner aktif.")
+            
+    updates = {"updated_at": now_iso()}
+    if body.name is not None:
+        updates["name"] = body.name
+    if body.role is not None:
+        updates["role"] = body.role
+    if body.status is not None:
+        if existing["id"] == user["id"] and body.status == "inactive":
+            raise HTTPException(400, "Anda tidak dapat menonaktifkan akun Anda sendiri.")
+        updates["status"] = body.status
+        
+    await db.users.update_one({"id": user_id}, {"$set": updates})
+    new_doc = await db.users.find_one({"id": user_id}, {"_id": 0, "password_hash": 0})
+    await audit(user, "update", "user", user_id, {"name": existing.get("name"), "role": existing.get("role"), "status": existing.get("status")}, new_doc)
+    return new_doc
+
+class ResetPasswordIn(BaseModel):
+    new_password: str
+
+@api.post("/users/{user_id}/reset-password", dependencies=[Depends(require_role("owner"))])
+async def reset_user_password(user_id: str, body: ResetPasswordIn, user: dict = Depends(get_current_user)):
+    existing = await db.users.find_one({"id": user_id})
+    if not existing:
+        raise HTTPException(404, "User tidak ditemukan")
+    validate_password_strength(body.new_password)
+    new_hash = hash_password(body.new_password)
+    await db.users.update_one({"id": user_id}, {"$set": {"password_hash": new_hash, "updated_at": now_iso()}})
+    await audit(user, "reset_password", "user", user_id, None, {"email": existing["email"]})
+    return {"ok": True, "message": f"Password untuk {existing['email']} berhasil di-reset"}
+
+@api.delete("/users/{user_id}", dependencies=[Depends(require_role("owner"))])
+async def delete_user(user_id: str, user: dict = Depends(get_current_user)):
+    existing = await db.users.find_one({"id": user_id})
+    if not existing:
+        raise HTTPException(404, "User tidak ditemukan")
+    if existing["id"] == user["id"]:
+        raise HTTPException(400, "Anda tidak dapat menghapus akun Anda sendiri.")
+    if existing["role"] == "owner":
+        other_owners = await db.users.count_documents({"role": "owner", "id": {"$ne": user_id}, "status": {"$ne": "archived"}})
+        if other_owners == 0:
+            raise HTTPException(400, "Tidak dapat menghapus satu-satunya akun Owner.")
+            
+    await db.users.update_one({"id": user_id}, {"$set": {"status": "archived", "archived_at": now_iso(), "updated_at": now_iso()}})
+    await audit(user, "archive", "user", user_id, None, {"email": existing["email"]})
+    return {"ok": True, "archived": True}
 
 # ---------- Generic CRUD builder ----------
 def collection_crud(name: str, module: str):
