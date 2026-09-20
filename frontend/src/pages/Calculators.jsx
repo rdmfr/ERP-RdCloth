@@ -1,10 +1,10 @@
 import { useCallback, useState, useEffect } from "react";
 import { PageHeader, Field, Input, Button } from "./_shared";
 import { api, fmtIDR } from "@/lib/api";
-import { downloadCSV, printPage } from "@/lib/export";
+import { downloadCSV, downloadPDF, printPage } from "@/lib/export";
 import { toast } from "sonner";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine, Legend } from "recharts";
-import { Download, Printer } from "lucide-react";
+import { Download, Printer, FileText } from "lucide-react";
 
 const HEALTH_CLR = { too_low:"bg-rose-100 text-rose-800 dark:bg-rose-900/30 dark:text-rose-400", safe:"bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400", healthy:"bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400", premium:"bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400" };
 
@@ -299,21 +299,25 @@ export function Reports() {
     const { data } = await api.get(`/reports/profit_loss?start=${start}&end=${end}`);
     setPl(data);
     const { data: detail } = await api.get(`/reports/profit_breakdown?start=${start}&end=${end}`);
-    setBreakdown(detail);
   }, [start, end]);
   useEffect(() => { load(); }, [load]);
   const exportCSV = () => {
     const q = new URLSearchParams(); if (start) q.set("start", start); if (end) q.set("end", end);
     downloadCSV(`/reports/export/profit_loss?${q.toString()}`, "profit_loss.csv");
   };
+  const exportPDF = () => {
+    const q = new URLSearchParams(); if (start) q.set("start", start); if (end) q.set("end", end);
+    downloadPDF(`/reports/pdf/profit_loss?${q.toString()}`, "laporan_laba_rugi.pdf");
+  };
   return (
     <div>
       <PageHeader title="Reports" subtitle="Profit & Loss" action={
-        <div className="flex gap-2 print:hidden">
+        <div className="flex gap-2 print:hidden flex-wrap">
           <Button variant="outline" onClick={() => downloadCSV("/reports/export/sales", "sales_export.csv")} data-testid="btn-export-sales-report"><Download size={14} className="inline mr-1"/> Sales CSV</Button>
           <Button variant="outline" onClick={() => downloadCSV("/reports/export/inventory", "inventory_export.csv")} data-testid="btn-export-inventory"><Download size={14} className="inline mr-1"/> Inventory CSV</Button>
           <Button variant="outline" onClick={exportCSV} data-testid="btn-export-pl"><Download size={14} className="inline mr-1"/> P&L CSV</Button>
-          <Button variant="outline" onClick={printPage} data-testid="btn-print"><Printer size={14} className="inline mr-1"/> Print / PDF</Button>
+          <Button variant="outline" onClick={exportPDF} data-testid="btn-export-pl-pdf"><FileText size={14} className="inline mr-1"/> PDF Resmi</Button>
+          <Button variant="outline" onClick={printPage} data-testid="btn-print"><Printer size={14} className="inline mr-1"/> Cetak</Button>
         </div>
       }/>
       <div className="p-6 rounded-lg border border-border bg-card">

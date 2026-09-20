@@ -3009,7 +3009,7 @@ async def export_balance_sheet_csv(as_of_date: str = "", user: dict = Depends(re
     rows.append({"category": "", "code": "", "name": "TOTAL KEWAJIBAN & EKUITAS", "amount": data["total_liabilities_and_equity"]})
     
     csv_text = to_csv(rows, ["category", "code", "name", "amount"])
-    return FastResponse(content=csv_text, media_type="text/csv", headers={"Content-Disposition": f"attachment; filename=balance_sheet_{data['as_of_date']}.csv"})
+    return Response(content=csv_text, media_type="text/csv", headers={"Content-Disposition": f"attachment; filename=balance_sheet_{data['as_of_date']}.csv"})
 
 
 @api.get("/reports/export/trial_balance")
@@ -3020,7 +3020,421 @@ async def export_trial_balance_csv(as_of_date: str = "", user: dict = Depends(re
         rows.append({"code": r["code"], "name": r["name"], "type": r["account_type"], "debit": r["debit"], "credit": r["credit"]})
     rows.append({"code": "", "name": "TOTAL", "type": "", "debit": data["total_debit"], "credit": data["total_credit"]})
     csv_text = to_csv(rows, ["code", "name", "type", "debit", "credit"])
-    return FastResponse(content=csv_text, media_type="text/csv", headers={"Content-Disposition": f"attachment; filename=trial_balance_{data['as_of_date']}.csv"})
+    return Response(content=csv_text, media_type="text/csv", headers={"Content-Disposition": f"attachment; filename=trial_balance_{data['as_of_date']}.csv"})
+
+
+@api.get("/reports/export/profit_loss")
+async def export_profit_loss_csv(start: str = "", end: str = "", user: dict = Depends(require_module("reports"))):
+    data = await report_pl(start, end)
+    period_str = f"{start or 'Awal'} s.d. {end or 'Sekarang'}"
+    rows = [
+        {"item": "Pendapatan Penjualan (Gross Revenue)", "amount": data["revenue"]},
+        {"item": "Beban Pokok Penjualan (COGS / HPP)", "amount": -data["cogs"]},
+        {"item": "LABA KOTOR (GROSS PROFIT)", "amount": data["gross_profit"]},
+        {"item": "Biaya Marketplace & Admin", "amount": -data["marketplace_fees"]},
+        {"item": "Biaya Iklan & Promosi", "amount": -data["advertising"]},
+        {"item": "Beban Operasional Lainnya", "amount": -data["operating_expenses"]},
+        {"item": "LABA BERSIH (NET PROFIT)", "amount": data["net_profit"]},
+    ]
+    csv_text = to_csv(rows, ["item", "amount"])
+    return Response(content=csv_text, media_type="text/csv", headers={"Content-Disposition": f'attachment; filename="profit_loss_{start or "all"}_{end or "all"}.csv"'})
+
+
+@api.get("/reports/export/general_ledger")
+async def export_general_ledger_csv(account_id: str = "", start: str = "", end: str = "", user: dict = Depends(require_module("reports"))):
+    if not account_id:
+        acc = await db.accounts.find_one({"code": "1-10001"}) or await db.accounts.find_one({"status": {"$ne": "archived"}})
+        if not acc:
+            raise HTTPException(404, "No account available")
+        account_id = acc["id"]
+    data = await report_general_ledger(account_id, start, end)
+    acc = data["account"]
+    rows = []
+    for t in data["transactions"]:
+        rows.append({
+            "account_code": acc.get("code", "-"),
+            "account_name": acc.get("name", ""),
+            "date": t["date"],
+            "reference": t["reference"],
+            "description": t["description"],
+            "source": t["source_type"],
+            "debit": t["debit"],
+            "credit": t["credit"],
+            "running_balance": t["running_balance"],
+        })
+    csv_text = to_csv(rows, ["account_code", "account_name", "date", "reference", "description", "source", "debit", "credit", "running_balance"])
+    return Response(content=csv_text, media_type="text/csv", headers={"Content-Disposition": f'attachment; filename="general_ledger_{acc.get("code","acc")}.csv"'})
+
+
+@api.get("/reports/export/journals")
+async def export_journals_csv(start: str = "", end: str = "", user: dict = Depends(require_module("reports"))):
+    query = {}
+    if start: query["date"] = {"$gte": start}
+    if end: query.setdefault("date", {})["$lte"] = f"{end}T23:59:59Z" if len(end) == 10 else end
+    
+    entries = await db.journal_entries.find(query, {"_id": 0}).sort("date", 1).to_list(10000)
+    accounts = {a["id"]: a for a in await db.accounts.find({}, {"_id": 0}).to_list(1000)}
+    
+    rows = []
+    for e in entries:
+        for line in e.get("lines", []):
+            acc = accounts.get(line.get("account_id"), {})
+            rows.append({
+                "journal_number": e.get("entry_number", "-"),
+                "date": str(e.get("date", ""))[:10],
+                "reference": e.get("reference", "-"),
+                "account_code": acc.get("code", "-"),
+                "account_name": acc.get("name", "-"),
+                "description": line.get("description") or e.get("description", ""),
+                "source_type": e.get("source_type", "manual"),
+                "debit": float(line.get("debit", 0)),
+                "credit": float(line.get("credit", 0)),
+            })
+    csv_text = to_csv(rows, ["journal_number", "date", "reference", "account_code", "account_name", "description", "source_type", "debit", "credit"])
+    return Response(content=csv_text, media_type="text/csv", headers={"Content-Disposition": 'attachment; filename="general_journal.csv"'})
+
+
+@api.get("/reports/export/sales")
+async def export_sales_csv(start: str = "", end: str = "", user: dict = Depends(require_module("reports"))):
+    query = {}
+    if start: query["date"] = {"$gte": start}
+    if end: query.setdefault("date", {})["$lte"] = f"{end}T23:59:59Z" if len(end) == 10 else end
+    
+    orders = await db.sales_orders.find(query, {"_id": 0}).sort("date", -1).to_list(10000)
+    rows = []
+    for o in orders:
+        items_summary = "; ".join([f"{it.get('product_name', it.get('variant_sku','-'))} (qty: {it.get('quantity',1)})" for it in o.get("items", [])])
+        rows.append({
+            "order_number": o.get("order_number", "-"),
+            "date": str(o.get("date", ""))[:10],
+            "customer_name": o.get("customer_name", "-"),
+            "sales_channel": o.get("sales_channel", "-"),
+            "items": items_summary,
+            "subtotal": float(o.get("subtotal", 0)),
+            "discount": float(o.get("discount", 0)),
+            "shipping": float(o.get("shipping", 0)),
+            "marketplace_fee": float(o.get("marketplace_fee", 0)),
+            "advertising_cost": float(o.get("advertising_cost", 0)),
+            "cogs": float(o.get("cogs", 0)),
+            "total": float(o.get("total", 0)),
+            "net_profit": float(o.get("net_profit", 0)),
+            "payment_status": o.get("payment_status", "-"),
+            "settlement_status": o.get("settlement_status", "unsettled"),
+        })
+    csv_text = to_csv(rows, ["order_number", "date", "customer_name", "sales_channel", "items", "subtotal", "discount", "shipping", "marketplace_fee", "advertising_cost", "cogs", "total", "net_profit", "payment_status", "settlement_status"])
+    return Response(content=csv_text, media_type="text/csv", headers={"Content-Disposition": 'attachment; filename="sales_report.csv"'})
+
+
+@api.get("/reports/export/inventory")
+async def export_inventory_valuation_csv(user: dict = Depends(require_module("reports"))):
+    products = await db.products.find({"status": {"$ne": "archived"}}, {"_id": 0}).to_list(2000)
+    materials = await db.materials.find({"status": {"$ne": "archived"}}, {"_id": 0}).to_list(2000)
+    
+    rows = []
+    total_valuation = 0.0
+    
+    # Finished goods
+    for p in products:
+        for v in p.get("variants", []):
+            stock = float(v.get("stock", 0))
+            cost = float(v.get("cost", 0))
+            val = stock * cost
+            total_valuation += val
+            rows.append({
+                "kind": "Produk Jadi",
+                "code": v.get("sku", "-"),
+                "name": f"{p.get('name')} ({v.get('color','-')}/{v.get('size','-')})",
+                "category": p.get("category_id", "Pakaian"),
+                "unit": "pcs",
+                "stock": stock,
+                "unit_cost": cost,
+                "selling_price": float(v.get("selling_price", 0)),
+                "total_valuation": val,
+                "min_stock": float(p.get("minimum_stock", 0)),
+                "status": "Low Stock" if stock <= float(p.get("minimum_stock", 0)) else "Normal",
+            })
+            
+    # Materials
+    for m in materials:
+        stock = float(m.get("stock", 0))
+        cost = float(m.get("cost", 0))
+        val = stock * cost
+        total_valuation += val
+        rows.append({
+            "kind": "Bahan Baku",
+            "code": m.get("sku", "-"),
+            "name": m.get("name", "-"),
+            "category": m.get("category", "Bahan"),
+            "unit": m.get("unit", "pcs"),
+            "stock": stock,
+            "unit_cost": cost,
+            "selling_price": 0,
+            "total_valuation": val,
+            "min_stock": float(m.get("minimum_stock", 0)),
+            "status": "Low Stock" if stock <= float(m.get("minimum_stock", 0)) else "Normal",
+        })
+        
+    csv_text = to_csv(rows, ["kind", "code", "name", "category", "unit", "stock", "unit_cost", "selling_price", "total_valuation", "min_stock", "status"])
+    return Response(content=csv_text, media_type="text/csv", headers={"Content-Disposition": 'attachment; filename="inventory_valuation.csv"'})
+
+
+@api.get("/reports/export/purchases")
+async def export_purchases_csv(start: str = "", end: str = "", user: dict = Depends(require_module("reports"))):
+    query = {}
+    if start: query["order_date"] = {"$gte": start}
+    if end: query.setdefault("order_date", {})["$lte"] = f"{end}T23:59:59Z" if len(end) == 10 else end
+    
+    pos = await db.purchase_orders.find(query, {"_id": 0}).sort("order_date", -1).to_list(5000)
+    rows = []
+    for po in pos:
+        rows.append({
+            "po_number": po.get("po_number", "-"),
+            "order_date": str(po.get("order_date", ""))[:10],
+            "supplier_name": po.get("supplier_name", "-"),
+            "total_amount": float(po.get("total_amount", 0)),
+            "paid_amount": float(po.get("paid_amount", 0)),
+            "payment_status": po.get("payment_status", "-"),
+            "received_status": po.get("received_status", "-"),
+        })
+    csv_text = to_csv(rows, ["po_number", "order_date", "supplier_name", "total_amount", "paid_amount", "payment_status", "received_status"])
+    return Response(content=csv_text, media_type="text/csv", headers={"Content-Disposition": 'attachment; filename="purchase_orders.csv"'})
+
+
+# ---------- FORMAL ACCOUNTING PDF GENERATOR ----------
+async def build_formal_accounting_pdf(
+    title: str,
+    period_label: str,
+    headers: List[str],
+    rows: List[List[Any]],
+    col_widths: List[float],
+    alignments: List[str] = None, # 'L' or 'R' or 'C'
+) -> io.BytesIO:
+    try:
+        from reportlab.lib import colors
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib.units import mm
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+    except ImportError as exc:
+        raise HTTPException(503, "PDF generation library (reportlab) is not available") from exc
+
+    profile = await db.settings_kv.find_one({"id": "business_profile"}, {"_id": 0}) or {}
+    business_name = profile.get("business_name") or profile.get("name") or "NexaBiz ERP Enterprise"
+    business_address = profile.get("address") or profile.get("business_address") or "Indonesia"
+    business_phone = profile.get("phone") or ""
+
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        rightMargin=14 * mm,
+        leftMargin=14 * mm,
+        topMargin=14 * mm,
+        bottomMargin=14 * mm,
+    )
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle(name="DocTitle", parent=styles["Heading1"], fontSize=16, leading=20, alignment=1, spaceAfter=2)
+    sub_style = ParagraphStyle(name="DocSub", parent=styles["Normal"], fontSize=9, leading=12, alignment=1, textColor=colors.HexColor("#475569"))
+    header_cell_style = ParagraphStyle(name="HeaderCell", parent=styles["Normal"], fontSize=9, leading=11, fontName="Helvetica-Bold", textColor=colors.HexColor("#0f172a"))
+    normal_cell_style = ParagraphStyle(name="NormalCell", parent=styles["Normal"], fontSize=8.5, leading=11)
+    right_cell_style = ParagraphStyle(name="RightCell", parent=styles["Normal"], fontSize=8.5, leading=11, alignment=2)
+    bold_right_style = ParagraphStyle(name="BoldRightCell", parent=styles["Normal"], fontSize=8.5, leading=11, alignment=2, fontName="Helvetica-Bold")
+    bold_left_style = ParagraphStyle(name="BoldLeftCell", parent=styles["Normal"], fontSize=8.5, leading=11, fontName="Helvetica-Bold")
+
+    story = [
+        Paragraph(f"<b>{business_name.upper()}</b>", title_style),
+        Paragraph(f"{title}<br/><font size='8'>{period_label} · Alamat: {business_address} {business_phone}</font>", sub_style),
+        Spacer(1, 10 * mm),
+    ]
+
+    table_data = []
+    # Header row
+    h_row = []
+    for idx, h in enumerate(headers):
+        is_r = alignments and alignments[idx] == 'R'
+        h_row.append(Paragraph(f"<b>{h}</b>", ParagraphStyle(name=f"H{idx}", parent=header_cell_style, alignment=2 if is_r else 0)))
+    table_data.append(h_row)
+
+    # Content rows
+    for r in rows:
+        row_cells = []
+        is_total_row = any(str(c).startswith("TOTAL") or str(c).startswith("LABA") for c in r if isinstance(c, str))
+        is_subheading = any(str(c).startswith("---") for c in r if isinstance(c, str))
+        
+        for idx, cell in enumerate(r):
+            val_str = str(cell if cell is not None else "")
+            is_r = alignments and idx < len(alignments) and alignments[idx] == 'R'
+            
+            if is_subheading:
+                row_cells.append(Paragraph(f"<b>{val_str}</b>", bold_left_style))
+            elif is_total_row:
+                row_cells.append(Paragraph(f"<b>{val_str}</b>", bold_right_style if is_r else bold_left_style))
+            else:
+                row_cells.append(Paragraph(val_str, right_cell_style if is_r else normal_cell_style))
+        table_data.append(row_cells)
+
+    col_widths_mm = [w * mm for w in col_widths]
+    table = Table(table_data, colWidths=col_widths_mm, repeatRows=1)
+    
+    t_style = [
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f1f5f9")),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+        ("LEFTPADDING", (0, 0), (-1, -1), 5),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 5),
+        ("LINEBELOW", (0, 0), (-1, 0), 1.2, colors.HexColor("#0f172a")),
+        ("LINEBELOW", (0, 1), (-1, -1), 0.4, colors.HexColor("#e2e8f0")),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+    ]
+    table.setStyle(TableStyle(t_style))
+    story.append(table)
+    
+    # Signatures / Footer block
+    story.append(Spacer(1, 12 * mm))
+    footer_text = f"<font size='7' color='#64748b'>Dicetak secara otomatis oleh sistem NexaBiz ERP pada {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}. Sah tanpa tanda tangan basah.</font>"
+    story.append(Paragraph(footer_text, styles["Normal"]))
+
+    doc.build(story)
+    buffer.seek(0)
+    return buffer
+
+
+def _format_idr(val: float) -> str:
+    try:
+        f = float(val)
+        return f"Rp {f:,.0f}".replace(",", ".")
+    except Exception:
+        return "Rp 0"
+
+
+@api.get("/reports/pdf/profit_loss")
+async def export_profit_loss_pdf(start: str = "", end: str = "", user: dict = Depends(require_module("reports"))):
+    data = await report_pl(start, end)
+    period_label = f"Periode: {start or 'Awal'} s.d. {end or datetime.now().strftime('%Y-%m-%d')}"
+    
+    headers = ["Keterangan Akun / Pos Finansial", "Nominal (IDR)"]
+    rows = [
+        ["Pendapatan Penjualan (Gross Revenue)", _format_idr(data["revenue"])],
+        ["Beban Pokok Penjualan (COGS / HPP)", f"- {_format_idr(data['cogs'])}"],
+        ["LABA KOTOR (GROSS PROFIT)", _format_idr(data["gross_profit"])],
+        ["Biaya Marketplace & Komisi Platform", f"- {_format_idr(data['marketplace_fees'])}"],
+        ["Biaya Iklan & Marketing", f"- {_format_idr(data['advertising'])}"],
+        ["Beban Operasional & Kantor", f"- {_format_idr(data['operating_expenses'])}"],
+        ["LABA BERSIH (NET PROFIT)", _format_idr(data["net_profit"])],
+    ]
+    
+    pdf_buffer = await build_formal_accounting_pdf(
+        title="LAPORAN LABA RUGI KOMPREHENSIF",
+        period_label=period_label,
+        headers=headers,
+        rows=rows,
+        col_widths=[125, 55],
+        alignments=["L", "R"],
+    )
+    return StreamingResponse(pdf_buffer, media_type="application/pdf", headers={"Content-Disposition": 'attachment; filename="laporan_laba_rugi.pdf"'})
+
+
+@api.get("/reports/pdf/balance_sheet")
+async def export_balance_sheet_pdf(as_of_date: str = "", user: dict = Depends(require_module("reports"))):
+    data = await report_balance_sheet(as_of_date)
+    period_label = f"Per Tanggal: {data['as_of_date']}"
+    
+    headers = ["Kode", "Nama Akun", "Kategori", "Jumlah (IDR)"]
+    rows = []
+    
+    # Current Assets
+    rows.append(["", "--- ASET LANCAR ---", "", ""])
+    for a in data["current_assets"]:
+        rows.append([a.get("code", "-"), a.get("name", "-"), "Aset Lancar", _format_idr(a.get("amount", 0))])
+    rows.append(["", "TOTAL ASET LANCAR", "", _format_idr(data["total_current_assets"])])
+    
+    # Fixed Assets
+    rows.append(["", "--- ASET TETAP ---", "", ""])
+    for a in data["fixed_assets"]:
+        rows.append([a.get("code", "-"), a.get("name", "-"), "Aset Tetap", _format_idr(a.get("amount", 0))])
+    rows.append(["", "TOTAL ASET TETAP", "", _format_idr(data["total_fixed_assets"])])
+    rows.append(["", "TOTAL ASET (AKTIVA)", "", _format_idr(data["total_assets"])])
+    
+    # Liabilities
+    rows.append(["", "--- KEWAJIBAN & HUTANG ---", "", ""])
+    for a in data["current_liabilities"]:
+        rows.append([a.get("code", "-"), a.get("name", "-"), "Kewajiban Lancar", _format_idr(a.get("amount", 0))])
+    rows.append(["", "TOTAL KEWAJIBAN", "", _format_idr(data["total_liabilities"])])
+    
+    # Equity
+    rows.append(["", "--- EKUITAS PEMILIK ---", "", ""])
+    for a in data["equity"]:
+        rows.append([a.get("code", "-"), a.get("name", "-"), "Ekuitas", _format_idr(a.get("amount", 0))])
+    rows.append(["", "TOTAL EKUITAS", "", _format_idr(data["total_equity"])])
+    rows.append(["", "TOTAL KEWAJIBAN & EKUITAS", "", _format_idr(data["total_liabilities_and_equity"])])
+
+    pdf_buffer = await build_formal_accounting_pdf(
+        title="LAPORAN POSISI KEUANGAN (NERACA)",
+        period_label=period_label,
+        headers=headers,
+        rows=rows,
+        col_widths=[25, 75, 35, 45],
+        alignments=["L", "L", "L", "R"],
+    )
+    return StreamingResponse(pdf_buffer, media_type="application/pdf", headers={"Content-Disposition": 'attachment; filename="neraca_keuangan.pdf"'})
+
+
+@api.get("/reports/pdf/trial_balance")
+async def export_trial_balance_pdf(as_of_date: str = "", user: dict = Depends(require_module("reports"))):
+    data = await report_trial_balance(as_of_date)
+    period_label = f"Per Tanggal: {data['as_of_date']}"
+    
+    headers = ["Kode", "Nama Akun", "Tipe", "Debit (IDR)", "Kredit (IDR)"]
+    rows = []
+    for r in data["rows"]:
+        rows.append([
+            r["code"],
+            r["name"],
+            r["account_type"].title(),
+            _format_idr(r["debit"]) if r["debit"] > 0 else "-",
+            _format_idr(r["credit"]) if r["credit"] > 0 else "-",
+        ])
+    rows.append(["", "TOTAL KESELURUHAN", "", _format_idr(data["total_debit"]), _format_idr(data["total_credit"])])
+
+    pdf_buffer = await build_formal_accounting_pdf(
+        title="NERACA SALDO (TRIAL BALANCE)",
+        period_label=period_label,
+        headers=headers,
+        rows=rows,
+        col_widths=[22, 65, 30, 32, 32],
+        alignments=["L", "L", "L", "R", "R"],
+    )
+    return StreamingResponse(pdf_buffer, media_type="application/pdf", headers={"Content-Disposition": 'attachment; filename="trial_balance.pdf"'})
+
+
+@api.get("/reports/pdf/general_ledger")
+async def export_general_ledger_pdf(account_id: str, start: str = "", end: str = "", user: dict = Depends(require_module("reports"))):
+    data = await report_general_ledger(account_id, start, end)
+    acc = data["account"]
+    period_label = f"Akun: {acc.get('code','-')} {acc.get('name','')} · Periode: {start or 'Awal'} s.d. {end or 'Sekarang'}"
+    
+    headers = ["Tanggal", "No Ref", "Keterangan", "Debit", "Kredit", "Saldo Berjalan"]
+    rows = []
+    for t in data["transactions"]:
+        rows.append([
+            t["date"],
+            t["reference"],
+            t["description"][:30],
+            _format_idr(t["debit"]) if t["debit"] > 0 else "-",
+            _format_idr(t["credit"]) if t["credit"] > 0 else "-",
+            _format_idr(t["running_balance"]),
+        ])
+    rows.append(["", "", "TOTAL & SALDO AKHIR", _format_idr(data["total_debit"]), _format_idr(data["total_credit"]), _format_idr(data["ending_balance"])])
+
+    pdf_buffer = await build_formal_accounting_pdf(
+        title="BUKU BESAR (GENERAL LEDGER)",
+        period_label=period_label,
+        headers=headers,
+        rows=rows,
+        col_widths=[22, 28, 55, 25, 25, 25],
+        alignments=["L", "L", "L", "R", "R", "R"],
+    )
+    return StreamingResponse(pdf_buffer, media_type="application/pdf", headers={"Content-Disposition": f'attachment; filename="general_ledger_{acc.get("code","acc")}.pdf"'})
 
 
 @api.get("/reports/profit_breakdown", dependencies=[Depends(require_module("reports"))])

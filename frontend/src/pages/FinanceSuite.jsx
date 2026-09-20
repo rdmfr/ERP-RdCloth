@@ -521,7 +521,11 @@ function Ledger() {
             <Field label="Sampai Tanggal">
               <Input type="date" value={glEnd} onChange={(e) => setGlEnd(e.target.value)} />
             </Field>
-            <Button variant="outline" onClick={loadGeneralLedger}><RefreshCw size={14} className="mr-1.5" /> Refresh</Button>
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={loadGeneralLedger}><RefreshCw size={14} className="mr-1.5" /> Refresh</Button>
+              <Button variant="outline" onClick={() => window.open(`/api/reports/export/general_ledger?account_id=${selectedAccId}&start=${glStart}&end=${glEnd}`, "_blank")}><Download size={14} className="mr-1.5" /> CSV</Button>
+              <Button variant="outline" onClick={() => window.open(`/api/reports/pdf/general_ledger?account_id=${selectedAccId}&start=${glStart}&end=${glEnd}`, "_blank")}><FileText size={14} className="mr-1.5" /> PDF</Button>
+            </div>
           </div>
 
           {glData && (
@@ -683,6 +687,17 @@ function FinancialReports() {
     }
   };
 
+  const handleExportPDF = () => {
+    const baseUrl = api.defaults?.baseURL || "/api";
+    if (reportType === "balance_sheet") {
+      window.open(`${baseUrl}/reports/pdf/balance_sheet?as_of_date=${asOfDate}`, "_blank");
+    } else if (reportType === "trial_balance") {
+      window.open(`${baseUrl}/reports/pdf/trial_balance?as_of_date=${asOfDate}`, "_blank");
+    } else {
+      window.open(`${baseUrl}/reports/pdf/profit_loss?start=${startDate}&end=${endDate}`, "_blank");
+    }
+  };
+
   const handlePrint = () => {
     window.print();
   };
@@ -712,6 +727,7 @@ function FinancialReports() {
             <Field label="Per Tanggal"><Input type="date" value={asOfDate} onChange={(e) => setAsOfDate(e.target.value)} /></Field>
           )}
           <Button variant="outline" onClick={handleExportCSV} className="mt-4"><Download size={14} className="mr-1.5" /> CSV</Button>
+          <Button variant="outline" onClick={handleExportPDF} className="mt-4"><FileText size={14} className="mr-1.5" /> PDF Resmi</Button>
           <Button variant="outline" onClick={handlePrint} className="mt-4"><Printer size={14} className="mr-1.5" /> Cetak</Button>
         </div>
       </div>

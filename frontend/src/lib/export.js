@@ -13,6 +13,19 @@ export async function downloadCSV(endpoint, filename) {
   URL.revokeObjectURL(url);
 }
 
+// Trigger PDF download / viewer via authenticated request
+export async function downloadPDF(endpoint, filename) {
+  const r = await api.get(endpoint, { responseType: "blob" });
+  const url = URL.createObjectURL(new Blob([r.data], { type: "application/pdf" }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
 // Convert client-side array of objects → CSV file
 export function exportRowsToCSV(rows, columns, filename) {
   const esc = (v) => {
