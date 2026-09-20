@@ -13,6 +13,7 @@ from backend import server
 
 class AuthHardeningTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
+        await server.init_db()
         for collection in ("users", "login_attempts", "audit_logs"):
             await server.db[collection].delete_many({})
         self.owner = {

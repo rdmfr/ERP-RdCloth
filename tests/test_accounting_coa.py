@@ -12,6 +12,7 @@ from backend import server
 
 class AccountingCoaTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
+        await server.init_db()
         for collection in ("accounts", "journal_entries", "financial_transactions", "sales_orders", "expenses", "settings_kv"):
             await server.db[collection].delete_many({})
         self.user = {"id": "test-owner", "email": "owner@example.com", "role": "owner"}

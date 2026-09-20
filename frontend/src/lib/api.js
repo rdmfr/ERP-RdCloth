@@ -4,8 +4,8 @@ import { APP_CONFIG, getBusinessPreferences } from "@/config/appConfig";
 // An empty backend URL means same-origin in production (Docker Nginx proxy),
 // but automatically defaults to http://localhost:8000 during local development (port 3000).
 const configuredBackendUrl = (process.env.REACT_APP_BACKEND_URL || "").trim();
-const isLocalDev = typeof window !== "undefined" && (window.location.port === "3000" || window.location.hostname === "localhost");
-const backendUrl = configuredBackendUrl || (isLocalDev && window.location.port === "3000" ? "http://localhost:8000" : (typeof window !== "undefined" ? window.location.origin : "http://localhost:8000"));
+const isDockerOrProd = typeof window !== "undefined" && (window.location.port === "80" || window.location.port === "443" || window.location.port === "");
+const backendUrl = configuredBackendUrl || (isDockerOrProd ? window.location.origin : "http://localhost:8000");
 const API = `${backendUrl.replace(/\/$/, "")}/api`;
 
 export const api = axios.create({ baseURL: API, withCredentials: true });

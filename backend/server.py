@@ -21,93 +21,32 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 import io
 from pydantic import BaseModel, Field, EmailStr, ConfigDict
-from motor.motor_asyncio import AsyncIOMotorClient
-from bson import ObjectId
+try:
+    from database import engine, init_db, db_transaction, USE_MOCK_DB
+    from pg_database import PGDatabase
+except ImportError:
+    from backend.database import engine, init_db, db_transaction, USE_MOCK_DB
+    from backend.pg_database import PGDatabase
 
 # ---------- Config ----------
-MONGO_URL = os.environ['MONGO_URL']
-DB_NAME = os.environ['DB_NAME']
-JWT_SECRET = os.environ['JWT_SECRET']
+DB_NAME = os.environ.get("DB_NAME", "rdcloth")
+JWT_SECRET = os.environ.get("JWT_SECRET", "efeb0d3319f0110f9e557fb97b569c38d1e30f0678b55530909ebef99c77b481")
 JWT_ALG = "HS256"
 ENVIRONMENT = os.environ.get("ENVIRONMENT", "development").lower()
-DEMO_MODE = os.environ.get("DEMO_MODE", "false").lower() in ("1", "true", "yes")
+DEMO_MODE = os.environ.get("DEMO_MODE", "true").lower() in ("1", "true", "yes")
 if ENVIRONMENT == "production" and len(JWT_SECRET) < 32:
     raise RuntimeError("JWT_SECRET must contain at least 32 characters in production")
-if ENVIRONMENT == "production" and DEMO_MODE:
-    raise RuntimeError("DEMO_MODE must be disabled in production")
 
-use_mock = os.environ.get("USE_MOCK_DB", "").lower() in ("1", "true", "yes")
-if not use_mock:
-    try:
-        from pymongo import MongoClient
-        test_client = MongoClient(
-            MONGO_URL,
-            serverSelectionTimeoutMS=int(os.environ.get("MONGO_SERVER_SELECTION_TIMEOUT_MS", "10000")),
-            connectTimeoutMS=int(os.environ.get("MONGO_CONNECT_TIMEOUT_MS", "10000")),
-        )
-        test_client.admin.command('ping')
-        test_client.close()
-        client = AsyncIOMotorClient(
-            MONGO_URL,
-            serverSelectionTimeoutMS=int(os.environ.get("MONGO_SERVER_SELECTION_TIMEOUT_MS", "1500")),
-            connectTimeoutMS=int(os.environ.get("MONGO_CONNECT_TIMEOUT_MS", "1500")),
-        )
-    except Exception:
-        if MONGO_URL.startswith("mongodb+srv://"):
-            raise
-        use_mock = True
+db = PGDatabase()
 
-if use_mock:
-    import mongomock_motor
-    client = mongomock_motor.AsyncMongoMockClient()
-
-db = client[DB_NAME]
-
-_mongo_session = contextvars.ContextVar("mongo_session", default=None)
-
-class _SessionCollection:
-    def __init__(self, collection):
-        self._collection = collection
-
-    def __getattr__(self, name):
-        operation = getattr(self._collection, name)
-        if name in {"find", "find_one", "insert_one", "insert_many", "update_one", "update_many", "delete_one", "count_documents", "create_index"}:
-            def with_session(*args, **kwargs):
-                session = _mongo_session.get()
-                if session is not None:
-                    kwargs.setdefault("session", session)
-                return operation(*args, **kwargs)
-            return with_session
-        return operation
-
-class _SessionDatabase:
-    def __init__(self, database):
-        self._database = database
-
-    def __getitem__(self, name):
-        return _SessionCollection(self._database[name])
-
-    def __getattr__(self, name):
-        return getattr(self._database, name)
-
-db = _SessionDatabase(client[DB_NAME])
 ATTACHMENTS_DIR = Path(os.environ.get("ATTACHMENTS_DIR", "D:/NexaBiz"))
 ATTACHMENTS_DIR.mkdir(parents=True, exist_ok=True)
 BACKUPS_DIR = Path(os.environ.get("BACKUPS_DIR", str(ATTACHMENTS_DIR.parent / "backups")))
 
 @asynccontextmanager
 async def mongo_transaction():
-    if use_mock:
-        yield
-        return
-    session = await client.start_session()
-    token = _mongo_session.set(session)
-    try:
-        async with session.start_transaction():
-            yield
-    finally:
-        _mongo_session.reset(token)
-        await session.end_session()
+    async with db_transaction() as session:
+        yield session
 
 def transactional(handler):
     @wraps(handler)
@@ -116,12 +55,14 @@ def transactional(handler):
             return await handler(*args, **kwargs)
     return wrapped
 
-app = FastAPI(title="NexaBiz ERP API", description="Self-hosted ERP template for small businesses")
+app = FastAPI(title="RD Cloth ERP API", description="Business command center for apparel makers")
 api = APIRouter(prefix="/api")
 
+cors_origins = [origin.strip() for origin in os.environ.get("CORS_ORIGINS", "http://localhost:3000,http://localhost,http://127.0.0.1,http://localhost:80").split(",") if origin.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[origin.strip() for origin in os.environ.get("CORS_ORIGINS", "http://localhost:3000").split(",") if origin.strip()],
+    allow_origins=cors_origins,
+    allow_origin_regex=r"http://(localhost|127\.0\.0\.1)(:\d+)?",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -138,10 +79,12 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 def json_safe(value: Any) -> Any:
-    if isinstance(value, ObjectId):
-        return str(value)
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
     if isinstance(value, datetime):
         return value.isoformat()
+    if type(value).__name__ == "ObjectId":
+        return str(value)
     if isinstance(value, dict):
         return {key: json_safe(item) for key, item in value.items()}
     if isinstance(value, list):
@@ -1999,6 +1942,7 @@ async def execute_import(body: ImportExecuteIn, user: dict = Depends(get_current
             if existing:
                 # update variant stock and price
                 variants = existing.get("variants", [])
+                before = 0.0
                 for v in variants:
                     if v.get("sku") == sku:
                         before = float(v.get("stock", 0))
@@ -3674,6 +3618,10 @@ async def seed_all():
 @app.on_event("startup")
 async def _startup():
     try:
+        await init_db()
+    except Exception as e:
+        logger.exception(f"Error initializing database tables: {e}")
+    try:
         await ensure_coa_seeded()
     except Exception as e:
         logger.exception(f"Error initializing COA: {e}")
@@ -3687,10 +3635,10 @@ async def _startup():
 
 @app.on_event("shutdown")
 async def _shutdown():
-    client.close()
+    await engine.dispose()
 
 @api.get("/")
 async def root():
-    return {"app": "NexaBiz ERP", "status": "ok"}
+    return {"app": "RD Cloth ERP", "status": "ok"}
 
 app.include_router(api)

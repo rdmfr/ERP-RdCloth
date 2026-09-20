@@ -1,6 +1,5 @@
 import os
 import unittest
-from bson import ObjectId
 
 os.environ.setdefault("MONGO_URL", "mongodb://localhost:27017")
 os.environ.setdefault("DB_NAME", "nexabiz_test")
@@ -14,6 +13,7 @@ from backend import server
 
 class BusinessInvariantTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
+        await server.init_db()
         for collection in ("products", "materials", "production_orders", "sales_orders", "returns", "suppliers", "customers", "accounts", "marketplaces", "expense_categories", "financial_transactions", "inventory_movements"):
             await server.db[collection].delete_many({})
         self.user = {"id": "test-user", "email": "test@example.com", "role": "owner"}

@@ -1,16 +1,37 @@
 services:
-  mongo:
-    image: mongo:7
+  postgres:
+    image: postgres:16-alpine
     restart: unless-stopped
     environment:
-      MONGO_INITDB_DATABASE: ${DB_NAME:-nexabiz}
+      POSTGRES_DB: ${DB_NAME:-rdcloth}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres123}
     volumes:
-      - mongo_data:/data/db
+      - pg_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "mongosh --quiet --eval 'db.adminCommand({ ping: 1 }).ok' | grep 1"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${DB_NAME:-rdcloth}"]
       interval: 10s
       timeout: 5s
-      retries: 10
+      retries: 5
+
+  pgbouncer:
+    image: edoburu/pgbouncer:v1.22.0
+    restart: unless-stopped
+    environment:
+      DB_USER: ${POSTGRES_USER:-postgres}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-postgres123}
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: ${DB_NAME:-rdcloth}
+      POOL_MODE: transaction
+      MAX_CLIENT_CONN: 100
+      DEFAULT_POOL_SIZE: 20
+      AUTH_TYPE: plain
+    ports:
+      - "6432:6432"
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   backend:
     build:
@@ -18,15 +39,16 @@ services:
       dockerfile: Dockerfile.backend
     restart: unless-stopped
     environment:
-      MONGO_URL: mongodb://mongo:27017
-      DB_NAME: ${DB_NAME:-nexabiz}
-      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env}
-      OWNER_EMAIL: ${OWNER_EMAIL:-owner@example.com}
-      OWNER_PASSWORD: ${OWNER_PASSWORD:?Set OWNER_PASSWORD in .env}
-      OWNER_NAME: ${OWNER_NAME:-Business Owner}
-      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres123}@pgbouncer:6432/${DB_NAME:-rdcloth}
+      DIRECT_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres123}@postgres:5432/${DB_NAME:-rdcloth}
+      DB_NAME: ${DB_NAME:-rdcloth}
+      JWT_SECRET: ${JWT_SECRET:-efeb0d3319f0110f9e557fb97b569c38d1e30f0678b55530909ebef99c77b481}
+      OWNER_EMAIL: ${OWNER_EMAIL:-rddev@gmail.com}
+      OWNER_PASSWORD: ${OWNER_PASSWORD:-rdcloth2026}
+      OWNER_NAME: ${OWNER_NAME:-RD Cloth Owner}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost,http://127.0.0.1,http://localhost:3000,http://localhost:80}
       ENVIRONMENT: ${ENVIRONMENT:-production}
-      DEMO_MODE: ${DEMO_MODE:-false}
+      DEMO_MODE: ${DEMO_MODE:-true}
       MAX_ATTACHMENT_SIZE_MB: ${MAX_ATTACHMENT_SIZE_MB:-10}
       ATTACHMENTS_DIR: /app/data/attachments
       BACKUPS_DIR: /app/data/backups
@@ -35,7 +57,9 @@ services:
       - attachments_data:/app/data/attachments
       - backups_data:/app/data/backups
     depends_on:
-      mongo:
+      pgbouncer:
+        condition: service_started
+      postgres:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/', timeout=3)"]
@@ -57,6 +81,6 @@ services:
         condition: service_healthy
 
 volumes:
-  mongo_data:
+  pg_data:
   attachments_data:
   backups_data:

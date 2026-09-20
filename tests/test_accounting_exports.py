@@ -12,6 +12,7 @@ from backend import server
 
 class AccountingExportsTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
+        await server.init_db()
         for collection in ("products", "materials", "customers", "suppliers", "sales_orders", "purchase_orders", "accounts", "journal_entries", "expenses", "settings_kv"):
             await server.db[collection].delete_many({})
         self.user = {"id": "test-owner", "email": "owner@example.com", "role": "owner"}
