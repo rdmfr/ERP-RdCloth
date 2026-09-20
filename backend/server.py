@@ -367,7 +367,8 @@ def collection_crud(name: str, module: str):
 
     @api.get(f"/{name}", dependencies=[Depends(require_module(module))])
     async def _list():
-        return await coll.find({"status": {"$ne": "archived"}}, {"_id": 0}).sort("created_at", -1).to_list(1000)
+        sort_field = [("code", 1), ("created_at", 1)] if name == "accounts" else [("created_at", -1)]
+        return await coll.find({"status": {"$ne": "archived"}}, {"_id": 0}).sort(sort_field).to_list(1000)
 
     @api.get(f"/{name}/{{item_id}}", dependencies=[Depends(require_module(module))])
     async def _get(item_id: str):
@@ -415,6 +416,8 @@ def collection_crud(name: str, module: str):
         old = await coll.find_one({"id": item_id}, {"_id": 0})
         if not old:
             raise HTTPException(404, "Not found")
+        if name == "accounts" and old.get("is_system"):
+            raise HTTPException(400, "Akun sistem inti tidak dapat dihapus.")
         archived_at = now_iso()
         await coll.update_one({"id": item_id}, {"$set": {"status": "archived", "archived_at": archived_at, "updated_at": archived_at}})
         archived = await coll.find_one({"id": item_id}, {"_id": 0})
@@ -1213,6 +1216,211 @@ async def tax_summary(start: str = "", end: str = "", user: dict = Depends(requi
     output = sum(float(x.get("tax", 0)) for x in sales)
     input_tax = sum(float(x.get("tax", 0)) for x in purchases)
     return {"output_tax": output, "input_tax": input_tax, "net_tax": output - input_tax, "period_start": start, "period_end": end}
+
+# ---------- STANDARD COA & OPENING BALANCE ----------
+STANDARD_COA = [
+    # 1-xxxx ASET (ASSETS)
+    {"code": "1-10001", "name": "Kas Tunai", "kind": "cash", "account_type": "asset", "subtype": "Kas & Bank", "normal_balance": "debit", "is_default": True, "is_system": True},
+    {"code": "1-10002", "name": "Bank BCA", "kind": "bank", "account_type": "asset", "subtype": "Kas & Bank", "normal_balance": "debit", "is_system": False},
+    {"code": "1-10003", "name": "Blu by BCA Digital", "kind": "bank", "account_type": "asset", "subtype": "Kas & Bank", "normal_balance": "debit", "is_system": False},
+    {"code": "1-10004", "name": "SeaBank", "kind": "bank", "account_type": "asset", "subtype": "Kas & Bank", "normal_balance": "debit", "is_system": False},
+    {"code": "1-10005", "name": "BRI", "kind": "bank", "account_type": "asset", "subtype": "Kas & Bank", "normal_balance": "debit", "is_system": False},
+    {"code": "1-10010", "name": "E-Wallet DANA", "kind": "wallet", "account_type": "asset", "subtype": "Kas & Bank", "normal_balance": "debit", "is_system": False},
+    {"code": "1-10011", "name": "GoPay", "kind": "wallet", "account_type": "asset", "subtype": "Kas & Bank", "normal_balance": "debit", "is_system": False},
+    {"code": "1-10020", "name": "Shopee Balance", "kind": "marketplace", "account_type": "asset", "subtype": "Kas & Bank", "normal_balance": "debit", "is_system": False},
+    {"code": "1-10021", "name": "TikTok Shop Balance", "kind": "marketplace", "account_type": "asset", "subtype": "Kas & Bank", "normal_balance": "debit", "is_system": False},
+    {"code": "1-10100", "name": "Piutang Usaha", "kind": "receivable", "account_type": "asset", "subtype": "Piutang", "normal_balance": "debit", "is_system": True},
+    {"code": "1-10200", "name": "Persediaan Barang Jadi", "kind": "inventory", "account_type": "asset", "subtype": "Persediaan", "normal_balance": "debit", "is_system": True},
+    {"code": "1-10210", "name": "Persediaan Bahan Baku", "kind": "inventory", "account_type": "asset", "subtype": "Persediaan", "normal_balance": "debit", "is_system": True},
+    {"code": "1-10800", "name": "Aset Tetap & Peralatan", "kind": "asset", "account_type": "asset", "subtype": "Aset Tetap", "normal_balance": "debit", "is_system": False},
+    {"code": "1-10890", "name": "Akumulasi Penyusutan Aset", "kind": "contra_asset", "account_type": "asset", "subtype": "Aset Tetap", "normal_balance": "credit", "is_system": False},
+    
+    # 2-xxxx KEWAJIBAN (LIABILITIES)
+    {"code": "2-10100", "name": "Hutang", "kind": "liability", "account_type": "liability", "subtype": "Kewajiban Lancar", "normal_balance": "credit", "is_system": True},
+    {"code": "2-10200", "name": "Hutang Gaji & Komisi", "kind": "liability", "account_type": "liability", "subtype": "Kewajiban Lancar", "normal_balance": "credit", "is_system": False},
+    {"code": "2-10300", "name": "Hutang Pajak", "kind": "liability", "account_type": "liability", "subtype": "Kewajiban Lancar", "normal_balance": "credit", "is_system": False},
+    {"code": "2-20100", "name": "Hutang Bank / Jangka Panjang", "kind": "liability", "account_type": "liability", "subtype": "Kewajiban Jangka Panjang", "normal_balance": "credit", "is_system": False},
+    
+    # 3-xxxx EKUITAS (EQUITY)
+    {"code": "3-10000", "name": "Modal Pemilik / Disetor", "kind": "equity", "account_type": "equity", "subtype": "Ekuitas", "normal_balance": "credit", "is_system": True},
+    {"code": "3-10001", "name": "Ekuitas Saldo Awal", "kind": "equity", "account_type": "equity", "subtype": "Ekuitas", "normal_balance": "credit", "is_system": True},
+    {"code": "3-10900", "name": "Laba Ditahan", "kind": "equity", "account_type": "equity", "subtype": "Ekuitas", "normal_balance": "credit", "is_system": True},
+    
+    # 4-xxxx PENDAPATAN (REVENUE)
+    {"code": "4-10000", "name": "Pendapatan Penjualan", "kind": "revenue", "account_type": "revenue", "subtype": "Pendapatan Operasional", "normal_balance": "credit", "is_system": True},
+    {"code": "4-10100", "name": "Pendapatan Custom / Jasa", "kind": "revenue", "account_type": "revenue", "subtype": "Pendapatan Operasional", "normal_balance": "credit", "is_system": False},
+    {"code": "4-10900", "name": "Pendapatan Lain-lain", "kind": "revenue", "account_type": "revenue", "subtype": "Pendapatan Non-Operasional", "normal_balance": "credit", "is_system": False},
+    
+    # 5-xxxx BEBAN POKOK PENJUALAN (COGS)
+    {"code": "5-10000", "name": "Beban Pokok Penjualan (HPP)", "kind": "cogs", "account_type": "cogs", "subtype": "Beban Pokok Penjualan", "normal_balance": "debit", "is_system": True},
+    
+    # 6-xxxx BEBAN OPERASIONAL (EXPENSES)
+    {"code": "6-10001", "name": "Beban Iklan & Marketing", "kind": "expense", "account_type": "expense", "subtype": "Beban Operasional", "normal_balance": "debit", "is_system": False},
+    {"code": "6-10002", "name": "Beban Listrik, Air & Internet", "kind": "expense", "account_type": "expense", "subtype": "Beban Operasional", "normal_balance": "debit", "is_system": False},
+    {"code": "6-10003", "name": "Beban Packaging & Ekspedisi", "kind": "expense", "account_type": "expense", "subtype": "Beban Operasional", "normal_balance": "debit", "is_system": False},
+    {"code": "6-10004", "name": "Beban Biaya Admin Marketplace", "kind": "expense", "account_type": "expense", "subtype": "Beban Operasional", "normal_balance": "debit", "is_system": False},
+    {"code": "6-10005", "name": "Beban Gaji & Upah Staf", "kind": "expense", "account_type": "expense", "subtype": "Beban Operasional", "normal_balance": "debit", "is_system": False},
+    {"code": "6-10006", "name": "Beban Sewa Tempat", "kind": "expense", "account_type": "expense", "subtype": "Beban Operasional", "normal_balance": "debit", "is_system": False},
+    {"code": "6-10007", "name": "Beban Penyusutan Aset", "kind": "expense", "account_type": "expense", "subtype": "Beban Operasional", "normal_balance": "debit", "is_system": False},
+    {"code": "6-10099", "name": "Beban Operasional Lainnya", "kind": "expense", "account_type": "expense", "subtype": "Beban Operasional", "normal_balance": "debit", "is_system": False},
+]
+
+async def ensure_coa_seeded():
+    for item in STANDARD_COA:
+        query = {"$or": [{"code": item["code"]}, {"name": item["name"]}]}
+        existing = await db.accounts.find_one(query)
+        if not existing:
+            doc = {
+                "id": new_id(),
+                "balance": 0,
+                "status": "active",
+                "created_at": now_iso(),
+                "updated_at": now_iso(),
+                **item,
+            }
+            await db.accounts.insert_one(doc)
+        else:
+            updates = {}
+            for field in ["code", "account_type", "subtype", "normal_balance", "is_system", "kind"]:
+                if field in item and (field not in existing or not existing[field]):
+                    updates[field] = item[field]
+            if updates:
+                updates["updated_at"] = now_iso()
+                await db.accounts.update_one({"id": existing["id"]}, {"$set": updates})
+
+class OpeningBalanceLine(BaseModel):
+    account_id: str
+    debit: float = 0
+    credit: float = 0
+
+class OpeningBalanceIn(BaseModel):
+    as_of_date: str = "2026-01-01"
+    lines: List[OpeningBalanceLine]
+    auto_balance: bool = True
+
+@api.get("/finance/opening-balance", dependencies=[Depends(require_module("finance"))])
+async def get_opening_balance():
+    meta = await db.settings_kv.find_one({"id": "opening_balance_meta"}, {"_id": 0}) or {}
+    as_of_date = meta.get("as_of_date", "2026-01-01")
+    accounts = await db.accounts.find({"status": {"$ne": "archived"}}, {"_id": 0}).sort("code", 1).to_list(1000)
+    
+    opening_journal = await db.journal_entries.find_one({"source_type": "opening_balance"}, {"_id": 0})
+    lines_by_acc = {}
+    if opening_journal:
+        for l in opening_journal.get("lines", []):
+            lines_by_acc[l["account_id"]] = l
+            
+    total_debit = 0.0
+    total_credit = 0.0
+    result_accounts = []
+    for acc in accounts:
+        line = lines_by_acc.get(acc["id"], {})
+        d = float(line.get("debit", acc.get("opening_debit", 0)))
+        c = float(line.get("credit", acc.get("opening_credit", 0)))
+        total_debit += d
+        total_credit += c
+        result_accounts.append({
+            "id": acc["id"],
+            "code": acc.get("code", "-"),
+            "name": acc.get("name", ""),
+            "account_type": acc.get("account_type", "asset"),
+            "subtype": acc.get("subtype", "Kas & Bank"),
+            "normal_balance": acc.get("normal_balance", "debit"),
+            "is_system": acc.get("is_system", False),
+            "opening_debit": d,
+            "opening_credit": c,
+        })
+    diff = round(total_debit - total_credit, 2)
+    return {
+        "as_of_date": as_of_date,
+        "is_set": bool(opening_journal),
+        "total_debit": total_debit,
+        "total_credit": total_credit,
+        "difference": diff,
+        "is_balanced": abs(diff) < 0.005,
+        "accounts": result_accounts,
+    }
+
+@api.post("/finance/opening-balance", dependencies=[Depends(require_module("finance"))])
+@transactional
+async def save_opening_balance(body: OpeningBalanceIn, user: dict = Depends(require_module("finance"))):
+    as_of_date = body.as_of_date or "2026-01-01"
+    raw_lines = [l.model_dump() for l in body.lines if (l.debit > 0 or l.credit > 0)]
+    
+    total_debit = sum(float(l["debit"]) for l in raw_lines)
+    total_credit = sum(float(l["credit"]) for l in raw_lines)
+    diff = round(total_debit - total_credit, 2)
+    
+    lines = list(raw_lines)
+    if abs(diff) > 0.005:
+        if body.auto_balance:
+            eq_acc = await db.accounts.find_one({"$or": [{"code": "3-10001"}, {"name": "Ekuitas Saldo Awal"}]})
+            if not eq_acc:
+                eq_id = new_id()
+                eq_acc = {
+                    "id": eq_id, "code": "3-10001", "name": "Ekuitas Saldo Awal",
+                    "account_type": "equity", "subtype": "Ekuitas", "normal_balance": "credit",
+                    "is_system": True, "balance": 0, "status": "active", "created_at": now_iso()
+                }
+                await db.accounts.insert_one(eq_acc)
+            
+            existing_line_idx = next((i for i, l in enumerate(lines) if l["account_id"] == eq_acc["id"]), None)
+            if diff > 0:
+                if existing_line_idx is not None:
+                    lines[existing_line_idx]["credit"] = float(lines[existing_line_idx]["credit"]) + diff
+                else:
+                    lines.append({"account_id": eq_acc["id"], "debit": 0, "credit": diff, "description": "Penyeimbang Saldo Awal"})
+            else:
+                if existing_line_idx is not None:
+                    lines[existing_line_idx]["debit"] = float(lines[existing_line_idx]["debit"]) + abs(diff)
+                else:
+                    lines.append({"account_id": eq_acc["id"], "debit": abs(diff), "credit": 0, "description": "Penyeimbang Saldo Awal"})
+            
+            total_debit = sum(float(l["debit"]) for l in lines)
+            total_credit = sum(float(l["credit"]) for l in lines)
+        else:
+            raise HTTPException(400, f"Total Debit ({total_debit}) dan Credit ({total_credit}) belum seimbang. Selisih: {diff}")
+            
+    await db.journal_entries.delete_many({"source_type": "opening_balance"})
+    
+    if lines:
+        entry = {
+            "id": new_id(),
+            "date": f"{as_of_date}T00:00:00Z" if len(as_of_date) == 10 else as_of_date,
+            "reference": "OPENING-BAL",
+            "description": "Saldo Awal Pembukuan",
+            "lines": lines,
+            "total": total_debit,
+            "source_type": "opening_balance",
+            "source_id": "opening_balance",
+            "created_by": user["id"],
+            "created_at": now_iso(),
+        }
+        await db.journal_entries.insert_one(entry)
+        
+    for l in lines:
+        acc_id = l["account_id"]
+        acc = await db.accounts.find_one({"id": acc_id})
+        if acc:
+            normal = acc.get("normal_balance", "debit")
+            net_change = (l["debit"] - l["credit"]) if normal == "debit" else (l["credit"] - l["debit"])
+            await db.accounts.update_one(
+                {"id": acc_id},
+                {"$set": {
+                    "opening_debit": l["debit"],
+                    "opening_credit": l["credit"],
+                    "balance": max(0, net_change),
+                    "updated_at": now_iso()
+                }}
+            )
+            
+    await db.settings_kv.update_one(
+        {"id": "opening_balance_meta"},
+        {"$set": {"id": "opening_balance_meta", "as_of_date": as_of_date, "updated_at": now_iso()}},
+        upsert=True
+    )
+    await audit(user, "update", "opening_balance", "opening_balance", None, {"as_of_date": as_of_date, "total": total_debit})
+    return {"ok": True, "as_of_date": as_of_date, "total": total_debit, "is_balanced": True}
 
 @api.get("/crm/summary")
 async def crm_summary(user: dict = Depends(require_module("crm"))):
@@ -2084,6 +2292,238 @@ async def report_pl(start: str = "", end: str = ""):
     return {"revenue": revenue, "cogs": cogs, "gross_profit": gp, "marketplace_fees": mp_fees, "advertising": adv, "operating_expenses": op_exp, "net_profit": net}
 
 
+@api.get("/reports/balance_sheet", dependencies=[Depends(require_module("reports"))])
+async def report_balance_sheet(as_of_date: str = ""):
+    as_of = as_of_date or datetime.now(timezone.utc).isoformat()[:10]
+    cutoff_iso = f"{as_of}T23:59:59Z" if len(as_of) == 10 else as_of
+    
+    accounts = await db.accounts.find({"status": {"$ne": "archived"}}, {"_id": 0}).sort("code", 1).to_list(1000)
+    
+    sales = await db.sales_orders.find({"date": {"$lte": cutoff_iso}}, {"_id": 0}).to_list(10000)
+    expenses = await db.expenses.find({"date": {"$lte": cutoff_iso}}, {"_id": 0}).to_list(10000)
+    revenue = sum(float(s.get("total", 0)) for s in sales)
+    cogs = sum(float(s.get("cogs", 0)) for s in sales)
+    mp_fees = sum(float(s.get("marketplace_fee", 0)) for s in sales)
+    adv = sum(float(s.get("advertising_cost", 0)) for s in sales)
+    op_exp = sum(float(e.get("amount", 0)) for e in expenses)
+    current_net_profit = revenue - cogs - mp_fees - adv - op_exp
+    
+    current_assets = []
+    fixed_assets = []
+    current_liabilities = []
+    long_term_liabilities = []
+    equity_items = []
+    
+    total_current_assets = 0.0
+    total_fixed_assets = 0.0
+    total_current_liabilities = 0.0
+    total_long_term_liabilities = 0.0
+    total_equity_nominal = 0.0
+    
+    for acc in accounts:
+        atype = acc.get("account_type", "asset")
+        stype = acc.get("subtype", "")
+        bal = float(acc.get("balance", 0))
+        
+        if atype == "asset":
+            if stype == "Aset Tetap":
+                is_contra = acc.get("normal_balance") == "credit"
+                amount = -bal if is_contra else bal
+                fixed_assets.append({**acc, "amount": amount})
+                total_fixed_assets += amount
+            else:
+                current_assets.append({**acc, "amount": bal})
+                total_current_assets += bal
+        elif atype == "liability":
+            if stype == "Kewajiban Jangka Panjang":
+                long_term_liabilities.append({**acc, "amount": bal})
+                total_long_term_liabilities += bal
+            else:
+                current_liabilities.append({**acc, "amount": bal})
+                total_current_liabilities += bal
+        elif atype == "equity":
+            equity_items.append({**acc, "amount": bal})
+            total_equity_nominal += bal
+            
+    equity_items.append({
+        "code": "3-10999",
+        "name": "Laba Periode Berjalan",
+        "account_type": "equity",
+        "subtype": "Ekuitas",
+        "amount": current_net_profit,
+        "is_system": True
+    })
+    total_equity = total_equity_nominal + current_net_profit
+    
+    total_assets = total_current_assets + total_fixed_assets
+    total_liabilities = total_current_liabilities + total_long_term_liabilities
+    total_liabilities_and_equity = total_liabilities + total_equity
+    diff = round(total_assets - total_liabilities_and_equity, 2)
+    
+    return {
+        "as_of_date": as_of,
+        "current_assets": current_assets,
+        "total_current_assets": total_current_assets,
+        "fixed_assets": fixed_assets,
+        "total_fixed_assets": total_fixed_assets,
+        "total_assets": total_assets,
+        "current_liabilities": current_liabilities,
+        "total_current_liabilities": total_current_liabilities,
+        "long_term_liabilities": long_term_liabilities,
+        "total_long_term_liabilities": total_long_term_liabilities,
+        "total_liabilities": total_liabilities,
+        "equity": equity_items,
+        "total_equity": total_equity,
+        "total_liabilities_and_equity": total_liabilities_and_equity,
+        "difference": diff,
+        "is_balanced": abs(diff) < 1.0,
+    }
+
+
+@api.get("/reports/trial_balance", dependencies=[Depends(require_module("reports"))])
+async def report_trial_balance(as_of_date: str = ""):
+    as_of = as_of_date or datetime.now(timezone.utc).isoformat()[:10]
+    cutoff_iso = f"{as_of}T23:59:59Z" if len(as_of) == 10 else as_of
+    
+    accounts = await db.accounts.find({"status": {"$ne": "archived"}}, {"_id": 0}).sort("code", 1).to_list(1000)
+    journals = await db.journal_entries.find({"date": {"$lte": cutoff_iso}}, {"_id": 0}).to_list(10000)
+    
+    lines_by_acc = {}
+    for j in journals:
+        for line in j.get("lines", []):
+            acc_id = line.get("account_id")
+            if acc_id:
+                lines_by_acc.setdefault(acc_id, {"debit": 0.0, "credit": 0.0})
+                lines_by_acc[acc_id]["debit"] += float(line.get("debit", 0))
+                lines_by_acc[acc_id]["credit"] += float(line.get("credit", 0))
+                
+    rows = []
+    total_debit = 0.0
+    total_credit = 0.0
+    
+    for acc in accounts:
+        act = lines_by_acc.get(acc["id"], {"debit": float(acc.get("opening_debit", 0)), "credit": float(acc.get("opening_credit", 0))})
+        if acc["id"] not in lines_by_acc and float(acc.get("balance", 0)) > 0:
+            if acc.get("normal_balance") == "credit":
+                act["credit"] = max(act["credit"], float(acc["balance"]))
+            else:
+                act["debit"] = max(act["debit"], float(acc["balance"]))
+                
+        d = round(act["debit"], 2)
+        c = round(act["credit"], 2)
+        if d > 0 or c > 0:
+            total_debit += d
+            total_credit += c
+            rows.append({
+                "account_id": acc["id"],
+                "code": acc.get("code", "-"),
+                "name": acc.get("name", ""),
+                "account_type": acc.get("account_type", "asset"),
+                "subtype": acc.get("subtype", ""),
+                "normal_balance": acc.get("normal_balance", "debit"),
+                "debit": d,
+                "credit": c,
+            })
+            
+    diff = round(total_debit - total_credit, 2)
+    return {
+        "as_of_date": as_of,
+        "rows": rows,
+        "total_debit": total_debit,
+        "total_credit": total_credit,
+        "difference": diff,
+        "is_balanced": abs(diff) < 0.01,
+    }
+
+
+@api.get("/reports/general_ledger", dependencies=[Depends(require_module("reports"))])
+async def report_general_ledger(account_id: str, start: str = "", end: str = ""):
+    acc = await db.accounts.find_one({"$or": [{"id": account_id}, {"code": account_id}]}, {"_id": 0})
+    if not acc:
+        raise HTTPException(404, "Account not found")
+        
+    query = {"lines.account_id": acc["id"]}
+    if start: query.setdefault("date", {})["$gte"] = start
+    if end: query.setdefault("date", {})["$lte"] = f"{end}T23:59:59Z" if len(end) == 10 else end
+    
+    entries = await db.journal_entries.find(query, {"_id": 0}).sort("date", 1).to_list(10000)
+    
+    running_balance = 0.0
+    transactions = []
+    normal = acc.get("normal_balance", "debit")
+    
+    for e in entries:
+        for line in e.get("lines", []):
+            if line.get("account_id") == acc["id"]:
+                d = float(line.get("debit", 0))
+                c = float(line.get("credit", 0))
+                if normal == "debit":
+                    running_balance += (d - c)
+                else:
+                    running_balance += (c - d)
+                transactions.append({
+                    "date": e.get("date", "")[:10],
+                    "reference": e.get("reference", "-"),
+                    "description": line.get("description") or e.get("description", ""),
+                    "source_type": e.get("source_type", "manual"),
+                    "debit": d,
+                    "credit": c,
+                    "running_balance": round(running_balance, 2),
+                })
+                
+    total_debit = sum(t["debit"] for t in transactions)
+    total_credit = sum(t["credit"] for t in transactions)
+    
+    return {
+        "account": acc,
+        "transactions": transactions,
+        "total_debit": total_debit,
+        "total_credit": total_credit,
+        "ending_balance": round(running_balance, 2),
+    }
+
+
+@api.get("/reports/export/balance_sheet")
+async def export_balance_sheet_csv(as_of_date: str = "", user: dict = Depends(require_module("reports"))):
+    data = await report_balance_sheet(as_of_date)
+    rows = []
+    rows.append({"category": "ASSETS", "code": "", "name": "--- ASET LANCAR ---", "amount": ""})
+    for a in data["current_assets"]:
+        rows.append({"category": "Current Asset", "code": a.get("code", ""), "name": a.get("name", ""), "amount": a.get("amount", 0)})
+    rows.append({"category": "", "code": "", "name": "TOTAL ASET LANCAR", "amount": data["total_current_assets"]})
+    
+    rows.append({"category": "ASSETS", "code": "", "name": "--- ASET TETAP ---", "amount": ""})
+    for a in data["fixed_assets"]:
+        rows.append({"category": "Fixed Asset", "code": a.get("code", ""), "name": a.get("name", ""), "amount": a.get("amount", 0)})
+    rows.append({"category": "", "code": "", "name": "TOTAL ASET TETAP", "amount": data["total_fixed_assets"]})
+    rows.append({"category": "", "code": "", "name": "TOTAL ASET", "amount": data["total_assets"]})
+    
+    rows.append({"category": "LIABILITIES", "code": "", "name": "--- KEWAJIBAN LANCAR ---", "amount": ""})
+    for a in data["current_liabilities"]:
+        rows.append({"category": "Current Liability", "code": a.get("code", ""), "name": a.get("name", ""), "amount": a.get("amount", 0)})
+    rows.append({"category": "", "code": "", "name": "TOTAL KEWAJIBAN", "amount": data["total_liabilities"]})
+    
+    rows.append({"category": "EQUITY", "code": "", "name": "--- EKUITAS ---", "amount": ""})
+    for a in data["equity"]:
+        rows.append({"category": "Equity", "code": a.get("code", ""), "name": a.get("name", ""), "amount": a.get("amount", 0)})
+    rows.append({"category": "", "code": "", "name": "TOTAL EKUITAS", "amount": data["total_equity"]})
+    rows.append({"category": "", "code": "", "name": "TOTAL KEWAJIBAN & EKUITAS", "amount": data["total_liabilities_and_equity"]})
+    
+    csv_text = to_csv(rows, ["category", "code", "name", "amount"])
+    return FastResponse(content=csv_text, media_type="text/csv", headers={"Content-Disposition": f"attachment; filename=balance_sheet_{data['as_of_date']}.csv"})
+
+
+@api.get("/reports/export/trial_balance")
+async def export_trial_balance_csv(as_of_date: str = "", user: dict = Depends(require_module("reports"))):
+    data = await report_trial_balance(as_of_date)
+    rows = []
+    for r in data["rows"]:
+        rows.append({"code": r["code"], "name": r["name"], "type": r["account_type"], "debit": r["debit"], "credit": r["credit"]})
+    rows.append({"code": "", "name": "TOTAL", "type": "", "debit": data["total_debit"], "credit": data["total_credit"]})
+    csv_text = to_csv(rows, ["code", "name", "type", "debit", "credit"])
+    return FastResponse(content=csv_text, media_type="text/csv", headers={"Content-Disposition": f"attachment; filename=trial_balance_{data['as_of_date']}.csv"})
+
+
 @api.get("/reports/profit_breakdown", dependencies=[Depends(require_module("reports"))])
 async def profit_breakdown(start: str = "", end: str = ""):
     query = {}
@@ -2101,6 +2541,7 @@ async def profit_breakdown(start: str = "", end: str = ""):
             quantity = float(item.get("quantity", 0)); price = float(item.get("selling_price", 0)); cost = float(item.get("cost", 0))
             design_row["quantity"] += quantity; design_row["revenue"] += quantity * price; design_row["profit"] += quantity * (price - cost)
     return {"by_channel": [{"channel": key, **value} for key, value in by_channel.items()], "by_design": [{"design": key, **value} for key, value in by_design.items()]}
+
 
 # ---------- AUDIT LOG ----------
 @api.get("/audit_logs", dependencies=[Depends(require_role("owner"))])
@@ -2142,29 +2583,9 @@ async def seed_all():
                     "name": name, "role": role, "created_at": now_iso(),
                 })
 
-    required_accounts = [
-        {"name": "Kas Tunai", "kind": "cash", "balance": 0, "is_default": True},
-        {"name": "Bank BCA", "kind": "bank", "balance": 0},
-        {"name": "Blu by BCA Digital", "kind": "bank", "balance": 0},
-        {"name": "SeaBank", "kind": "bank", "balance": 0},
-        {"name": "BRI", "kind": "bank", "balance": 0},
-        {"name": "E-Wallet DANA", "kind": "wallet", "balance": 0},
-        {"name": "GoPay", "kind": "wallet", "balance": 0},
-        {"name": "Hutang", "kind": "liability", "balance": 0},
-        {"name": "Piutang Usaha", "kind": "receivable", "balance": 0},
-        {"name": "Pendapatan Penjualan", "kind": "revenue", "balance": 0},
-        {"name": "Beban Pembelian", "kind": "expense", "balance": 0},
-        {"name": "Shopee Balance", "kind": "marketplace", "balance": 0},
-    ]
-    account_index = {}
-    for account in required_accounts:
-        existing = await db.accounts.find_one({"name": account["name"]})
-        if existing is None:
-            doc = {"id": new_id(), **account, "created_at": now_iso()}
-            await db.accounts.insert_one(doc)
-            existing = doc
-        account_index[account["name"]] = existing
-    cash_id = account_index["Kas Tunai"]["id"]
+    await ensure_coa_seeded()
+    cash_acc = await db.accounts.find_one({"code": "1-10001"}) or await db.accounts.find_one({"name": "Kas Tunai"})
+    cash_id = cash_acc["id"] if cash_acc else None
 
     await db.marketplaces.update_one({"name": "TikTok Shop"}, {"$set": {
         "admin_fee_pct": 8, "service_fee_pct": 4, "payment_fee_pct": 0,
@@ -2276,12 +2697,13 @@ async def seed_all():
     })
 
     # Owner initial capital
-    await db.financial_transactions.insert_one({
-        "id": new_id(), "type": "owner_investment", "amount": 4000000,
-        "account_id": cash_id, "description": "Initial Capital (DEMO)",
-        "ref_type": "manual", "ref_id": "", "date": now_iso(), "created_at": now_iso(),
-    })
-    await db.accounts.update_one({"id": cash_id}, {"$inc": {"balance": 4000000}})
+    if cash_id:
+        await db.financial_transactions.insert_one({
+            "id": new_id(), "type": "owner_investment", "amount": 4000000,
+            "account_id": cash_id, "description": "Initial Capital (DEMO)",
+            "ref_type": "manual", "ref_id": "", "date": now_iso(), "created_at": now_iso(),
+        })
+        await db.accounts.update_one({"id": cash_id}, {"$inc": {"balance": 4000000}})
 
     # Sample sales
     owner = await db.users.find_one({"role": "owner"})
@@ -2320,12 +2742,13 @@ async def seed_all():
         await db.products.update_one({"id": p["id"]}, {"$set": {"variants": p["variants"]}})
 
     # sample expenses
-    for name, amt, cat in [("Listrik Bulanan", 350000, "Electricity"), ("Internet", 400000, "Internet"), ("Iklan Shopee", 200000, "Advertising")]:
-        d = datetime.now(timezone.utc).isoformat()
-        exp_id = new_id()
-        await db.expenses.insert_one({"id": exp_id, "date": d, "category": cat, "description": name, "amount": amt, "account_id": cash_id, "created_at": d})
-        await db.accounts.update_one({"id": cash_id}, {"$inc": {"balance": -amt}})
-        await db.financial_transactions.insert_one({"id": new_id(), "type": "expense", "amount": amt, "account_id": cash_id, "description": name, "ref_type": "expense", "ref_id": exp_id, "date": d, "created_at": d})
+    if cash_id:
+        for name, amt, cat in [("Listrik Bulanan", 350000, "Electricity"), ("Internet", 400000, "Internet"), ("Iklan Shopee", 200000, "Advertising")]:
+            d = datetime.now(timezone.utc).isoformat()
+            exp_id = new_id()
+            await db.expenses.insert_one({"id": exp_id, "date": d, "category": cat, "description": name, "amount": amt, "account_id": cash_id, "created_at": d})
+            await db.accounts.update_one({"id": cash_id}, {"$inc": {"balance": -amt}})
+            await db.financial_transactions.insert_one({"id": new_id(), "type": "expense", "amount": amt, "account_id": cash_id, "description": name, "ref_type": "expense", "ref_id": exp_id, "date": d, "created_at": d})
 
     # asset
     await db.assets.insert_one({
@@ -2337,7 +2760,10 @@ async def seed_all():
 
 @app.on_event("startup")
 async def _startup():
-    # Allow skipping demo data seeding when MongoDB isn't available or during quick dev runs
+    try:
+        await ensure_coa_seeded()
+    except Exception as e:
+        logger.exception(f"Error initializing COA: {e}")
     if os.environ.get("SKIP_DEMO_SEED", "").lower() in ("1", "true", "yes") or not DEMO_MODE:
         logger.info("SKIP_DEMO_SEED is set; skipping demo data seeding on startup")
         return
