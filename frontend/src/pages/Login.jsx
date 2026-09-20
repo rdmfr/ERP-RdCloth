@@ -59,6 +59,40 @@ export default function Login() {
           <button data-testid="login-submit" disabled={loading} className="w-full py-2.5 rounded-md bg-neutral-900 dark:bg-stone-100 text-white dark:text-stone-900 font-semibold text-sm hover:opacity-90 transition-opacity disabled:opacity-50">
             {loading ? "Memuat..." : "Masuk"}
           </button>
+
+          <div className="pt-4 border-t border-border space-y-2">
+            <div className="text-[10px] uppercase font-bold tracking-widest text-muted-foreground text-center">Akun Demo Cepat</div>
+            <div className="grid grid-cols-2 gap-1.5">
+              <button
+                type="button"
+                onClick={() => { setEmail("rddev@gmail.com"); setPwd("rdcloth2026"); }}
+                className="px-2.5 py-1.5 rounded border border-border bg-stone-100 dark:bg-stone-900 text-xs font-medium hover:bg-stone-200 dark:hover:bg-stone-800 text-left"
+              >
+                👑 <b>Owner</b> <span className="block text-[10px] text-muted-foreground">rddev@gmail.com</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => { setEmail("admin@example.com"); setPwd("admin123"); }}
+                className="px-2.5 py-1.5 rounded border border-border bg-stone-100 dark:bg-stone-900 text-xs font-medium hover:bg-stone-200 dark:hover:bg-stone-800 text-left"
+              >
+                🧑‍💼 <b>Admin</b> <span className="block text-[10px] text-muted-foreground">admin@example.com</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => { setEmail("finance@example.com"); setPwd("finance123"); }}
+                className="px-2.5 py-1.5 rounded border border-border bg-stone-100 dark:bg-stone-900 text-xs font-medium hover:bg-stone-200 dark:hover:bg-stone-800 text-left"
+              >
+                💰 <b>Finance</b> <span className="block text-[10px] text-muted-foreground">finance@example.com</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => { setEmail("production@example.com"); setPwd("production123"); }}
+                className="px-2.5 py-1.5 rounded border border-border bg-stone-100 dark:bg-stone-900 text-xs font-medium hover:bg-stone-200 dark:hover:bg-stone-800 text-left"
+              >
+                🏭 <b>Production</b> <span className="block text-[10px] text-muted-foreground">production@example.com</span>
+              </button>
+            </div>
+          </div>
         </form>
       </div>
     </div>

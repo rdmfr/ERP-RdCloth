@@ -1,13 +1,14 @@
 import axios from "axios";
 import { APP_CONFIG, getBusinessPreferences } from "@/config/appConfig";
 
-// An empty backend URL means same-origin, which is required for the Docker/Nginx
-// deployment. Local development can still provide an explicit backend origin.
+// An empty backend URL means same-origin in production (Docker Nginx proxy),
+// but automatically defaults to http://localhost:8000 during local development (port 3000).
 const configuredBackendUrl = (process.env.REACT_APP_BACKEND_URL || "").trim();
-const backendUrl = configuredBackendUrl || window.location.origin;
+const isLocalDev = typeof window !== "undefined" && (window.location.port === "3000" || window.location.hostname === "localhost");
+const backendUrl = configuredBackendUrl || (isLocalDev && window.location.port === "3000" ? "http://localhost:8000" : (typeof window !== "undefined" ? window.location.origin : "http://localhost:8000"));
 const API = `${backendUrl.replace(/\/$/, "")}/api`;
 
-export const api = axios.create({ baseURL: API });
+export const api = axios.create({ baseURL: API, withCredentials: true });
 
 api.interceptors.request.use((cfg) => {
   const token = localStorage.getItem("nexabiz_token");
