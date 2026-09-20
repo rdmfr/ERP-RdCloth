@@ -15,7 +15,7 @@ services:
       retries: 5
 
   pgbouncer:
-    image: edoburu/pgbouncer:v1.22.0
+    image: edoburu/pgbouncer:latest
     restart: unless-stopped
     environment:
       DB_USER: ${POSTGRES_USER:-postgres}
@@ -28,7 +28,7 @@ services:
       DEFAULT_POOL_SIZE: 20
       AUTH_TYPE: plain
     ports:
-      - "6432:6432"
+      - "6432:5432"
     depends_on:
       postgres:
         condition: service_healthy
@@ -39,7 +39,7 @@ services:
       dockerfile: Dockerfile.backend
     restart: unless-stopped
     environment:
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres123}@pgbouncer:6432/${DB_NAME:-rdcloth}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres123}@pgbouncer:5432/${DB_NAME:-rdcloth}
       DIRECT_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres123}@postgres:5432/${DB_NAME:-rdcloth}
       DB_NAME: ${DB_NAME:-rdcloth}
       JWT_SECRET: ${JWT_SECRET:-efeb0d3319f0110f9e557fb97b569c38d1e30f0678b55530909ebef99c77b481}

@@ -21,6 +21,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 import io
 from pydantic import BaseModel, Field, EmailStr, ConfigDict
+from sqlalchemy import String
 try:
     from database import engine, init_db, db_transaction, USE_MOCK_DB
     from pg_database import PGDatabase

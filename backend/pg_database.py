@@ -1,7 +1,7 @@
 import logging
 import uuid
 from typing import Any, Dict, List, Optional, Union
-from sqlalchemy import select, update, delete, func, or_, and_, asc, desc, text
+from sqlalchemy import String, select, update, delete, func, or_, and_, asc, desc, text
 try:
     import models
     from database import AsyncSessionLocal, init_db
@@ -142,6 +142,18 @@ class PGCollection:
                 continue
 
             if not hasattr(model, key):
+                if hasattr(model, "extra_data"):
+                    extra_value = model.extra_data[key].as_string()
+                    if isinstance(val, dict):
+                        for op, op_val in val.items():
+                            if op == "$ne":
+                                clauses.append(or_(extra_value != str(op_val), extra_value.is_(None)))
+                            elif op == "$in":
+                                clauses.append(extra_value.in_([str(item) for item in op_val]))
+                            elif op == "$regex":
+                                clauses.append(extra_value.ilike(f"%{op_val}%"))
+                    else:
+                        clauses.append(extra_value == str(val))
                 continue
 
             col = getattr(model, key)
@@ -209,8 +221,6 @@ class PGCollection:
                     for p_key, p_val in projection.items():
                         if p_val == 0 or p_val is False:
                             d.pop(p_key, None)
-                            if p_key == "_id":
-                                d.pop("id", None)
                 out.append(d)
             return out
 
@@ -219,6 +229,10 @@ class PGCollection:
         doc.pop("_id", None)
         if "id" not in doc or not doc["id"]:
             doc["id"] = doc.get("key") or doc.get("code") or str(uuid.uuid4())
+        if self.name == "materials" and not doc.get("name"):
+            doc["name"] = doc.get("code") or doc["id"]
+        if self.name == "products" and not doc.get("name"):
+            doc["name"] = doc.get("sku") or doc["id"]
         if hasattr(self.model_cls, "key") and "key" not in doc and "id" in doc:
             doc["key"] = doc["id"]
 
