@@ -24,6 +24,7 @@ export default function Settings() {
 
   useEffect(() => {
     loadUsers();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
 
   const { rows: cats, save: saveCat, remove: rmCat } = useCRUD("categories");

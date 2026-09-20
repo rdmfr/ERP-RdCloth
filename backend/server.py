@@ -1692,114 +1692,512 @@ async def refund_sale(sid: str, body: Dict[str, Any], user: dict = Depends(requi
     refunded_total = refunded_before + amount
     await db.sales_orders.update_one({"id": sid}, {"$set": {"payment_status": "refunded" if refunded_total >= order_total else "partially_refunded", "refund_amount": refunded_total, "updated_at": now_iso()}})
     await audit(user, "refund", "sales_order", sid, so, {"amount": amount})
-    return {"ok": True, "amount": amount}
+# ---------- UNIVERSAL IMPORT ENGINE & PREVIEW VALIDATOR ----------
 
-# ---------- CSV IMPORT ----------
+IMPORT_TEMPLATES = {
+    "products": {
+        "filename": "template_products.csv",
+        "csv": "name,sku,category,selling_price,cost,stock,color,size,min_stock\nKaos Polos Cotton Combed 30s,KPC-BLK-M,Pakaian,85000,45000,50,Hitam,M,10\nKaos Polos Cotton Combed 30s,KPC-BLK-L,Pakaian,85000,45000,40,Hitam,L,10\nKemeja Oxford Pria,KMO-WHT-XL,Pakaian,135000,75000,25,Putih,XL,5\n",
+    },
+    "materials": {
+        "filename": "template_materials.csv",
+        "csv": "name,sku,category,unit,cost,stock,min_stock\nKain Cotton Combed 30s Hitam,RAW-CC30-BLK,Kain,kg,110000,25.5,5.0\nBenang Jahit Poliester Hitam,RAW-BNG-BLK,Benang,roll,15000,100,20\nKancing Kemeja 18L Putih,RAW-KNC-WHT,Aksesoris,gross,25000,15,3\n",
+    },
+    "customers": {
+        "filename": "template_customers.csv",
+        "csv": "name,phone,email,address,customer_type\nBudi Santoso,081234567890,budi@example.com,Jl. Sudirman No. 10 Jakarta,vip\nSiti Nurhaliza,082345678901,siti@example.com,Jl. Merdeka No. 45 Bandung,new\nAndi Wijaya,085678901234,andi@example.com,Jl. Diponegoro No. 8 Surabaya,returning\n",
+    },
+    "suppliers": {
+        "filename": "template_suppliers.csv",
+        "csv": "name,contact_name,phone,email,address\nCV Tekstil Maju Jaya,Pak Hendra,081122334455,hendra@tekstilmaju.com,Kawasan Industri Cimahi Bandung\nPT Kancing Perkasa,Ibu Dewi,082233445566,dewi@kancingperkasa.co.id,Jl. Rungkut Industri Surabaya\n",
+    },
+    "sales_orders": {
+        "filename": "template_sales_orders.csv",
+        "csv": "order_number,date,customer_name,sales_channel,variant_sku,quantity,selling_price,discount,shipping,marketplace_fee,advertising_cost\nSP-2026-0001,2026-08-14,Rina Sari,Shopee,RDB-BL-M,2,89000,0,10000,15575,3000\nSP-2026-0002,2026-08-13,Budi Santoso,Shopee,RDB-WH-L,1,89000,5000,10000,7788,3000\nTT-2026-0001,2026-08-12,Andi Wijaya,TikTok Shop,RDC-BL-M,1,109000,0,10000,8720,3000\n",
+    },
+    "opening_balance": {
+        "filename": "template_opening_balance.csv",
+        "csv": "account_code,debit,credit\n1-10001,25000000,0\n1-10002,50000000,0\n2-10100,0,15000000\n3-10000,0,60000000\n",
+    },
+}
 
 def _coerce_float(value: Any, default: float = 0.0) -> float:
     try:
         if value is None or value == "":
             return default
-        return float(str(value).replace(",", "").replace("%", ""))
+        return float(str(value).replace(",", "").replace("%", "").strip())
     except Exception:
         return default
 
+@api.get("/imports/templates/{kind}")
+@api.get("/imports/template/{kind}")
+async def get_import_template(kind: str):
+    kind_normalized = kind.lower().strip()
+    if kind_normalized in ("orders", "sales", "marketplace"):
+        kind_normalized = "sales_orders"
+    tmpl = IMPORT_TEMPLATES.get(kind_normalized)
+    if not tmpl:
+        raise HTTPException(404, f"Template for '{kind}' not found. Available: {', '.join(IMPORT_TEMPLATES.keys())}")
+    return Response(
+        content=tmpl["csv"],
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{tmpl["filename"]}"'},
+    )
 
-@api.post("/imports/csv")
-async def import_csv_rows(body: Dict[str, Any], user: dict = Depends(require_module("dashboard"))):
-    kind = str(body.get("kind", "")).lower()
-    rows = body.get("rows") or []
+class ImportPreviewIn(BaseModel):
+    kind: str
+    rows: List[Dict[str, Any]]
+
+class ImportExecuteIn(BaseModel):
+    kind: str
+    rows: List[Dict[str, Any]]
+    allow_partial: bool = False
+
+async def validate_import_rows(kind: str, rows: List[Dict[str, Any]]) -> Dict[str, Any]:
+    kind_normalized = kind.lower().strip()
+    if kind_normalized in ("orders", "sales", "marketplace"):
+        kind_normalized = "sales_orders"
+
+    if kind_normalized not in IMPORT_TEMPLATES:
+        raise HTTPException(400, f"Unsupported import type: '{kind}'. Allowed: {list(IMPORT_TEMPLATES.keys())}")
+
     if not rows:
-        raise HTTPException(400, "CSV import rows are empty")
-    created = 0
-    skipped = []
+        raise HTTPException(400, "Rows to import cannot be empty")
+
+    validation_results = []
+    seen_skus_batch = set()
+    seen_order_numbers_batch = set()
+
+    # Preload reference data for ultra-fast validation
+    all_products = await db.products.find({"status": {"$ne": "archived"}}, {"_id": 0}).to_list(2000)
+    sku_to_product = {}
+    for p in all_products:
+        for v in p.get("variants", []):
+            if v.get("sku"):
+                sku_to_product[v["sku"]] = {"product": p, "variant": v}
+
+    all_materials = await db.materials.find({"status": {"$ne": "archived"}}, {"_id": 0}).to_list(2000)
+    existing_mat_skus = {m.get("sku") for m in all_materials if m.get("sku")}
+    existing_mat_names = {m.get("name", "").lower() for m in all_materials if m.get("name")}
+
+    all_accounts = await db.accounts.find({"status": {"$ne": "archived"}}, {"_id": 0}).to_list(1000)
+    accounts_by_code = {a.get("code"): a for a in all_accounts if a.get("code")}
+
+    for idx, raw_row in enumerate(rows, start=1):
+        errors = []
+        warnings = []
+        parsed = {}
+
+        if kind_normalized == "products":
+            name = str(raw_row.get("name") or raw_row.get("product_name") or "").strip()
+            sku = str(raw_row.get("sku") or raw_row.get("variant_sku") or "").strip()
+            category = str(raw_row.get("category") or raw_row.get("category_id") or "Pakaian").strip()
+            selling_price = _coerce_float(raw_row.get("selling_price") or raw_row.get("price"), 0)
+            cost = _coerce_float(raw_row.get("cost") or raw_row.get("hpp"), 0)
+            stock = _coerce_float(raw_row.get("stock"), 0)
+            min_stock = _coerce_float(raw_row.get("min_stock") or raw_row.get("minimum_stock"), 0)
+            color = str(raw_row.get("color") or "-").strip()
+            size = str(raw_row.get("size") or "-").strip()
+
+            if not name:
+                errors.append("Nama produk wajib diisi.")
+            if not sku:
+                errors.append("SKU varian produk wajib diisi.")
+            elif sku in seen_skus_batch:
+                errors.append(f"SKU '{sku}' duplikat dalam file import ini.")
+            elif sku in sku_to_product:
+                warnings.append(f"SKU '{sku}' sudah ada di database; stok/harga akan diperbarui.")
+
+            if selling_price < 0:
+                errors.append("Harga jual tidak boleh negatif.")
+            if cost < 0:
+                errors.append("HPP/Biaya pokok tidak boleh negatif.")
+            if stock < 0:
+                errors.append("Stok tidak boleh negatif.")
+
+            seen_skus_batch.add(sku)
+            parsed = {
+                "name": name, "sku": sku, "category": category,
+                "selling_price": selling_price, "cost": cost,
+                "stock": stock, "min_stock": min_stock,
+                "color": color, "size": size,
+            }
+
+        elif kind_normalized == "materials":
+            name = str(raw_row.get("name") or raw_row.get("material_name") or "").strip()
+            sku = str(raw_row.get("sku") or "").strip()
+            category = str(raw_row.get("category") or "Bahan Baku").strip()
+            unit = str(raw_row.get("unit") or "pcs").strip()
+            cost = _coerce_float(raw_row.get("cost") or raw_row.get("unit_cost") or raw_row.get("price"), 0)
+            stock = _coerce_float(raw_row.get("stock"), 0)
+            min_stock = _coerce_float(raw_row.get("min_stock") or raw_row.get("minimum_stock"), 0)
+
+            if not name:
+                errors.append("Nama bahan baku wajib diisi.")
+            if name.lower() in existing_mat_names:
+                warnings.append(f"Bahan '{name}' sudah ada; data akan ditambahkan/diperbarui.")
+            if sku and sku in existing_mat_skus:
+                warnings.append(f"SKU bahan '{sku}' sudah ada di sistem.")
+            if cost < 0:
+                errors.append("Biaya satuan (cost) tidak boleh negatif.")
+            if stock < 0:
+                errors.append("Stok bahan tidak boleh negatif.")
+
+            parsed = {
+                "name": name, "sku": sku or f"MAT-{new_id()[:6].upper()}", "category": category,
+                "unit": unit, "cost": cost, "stock": stock, "min_stock": min_stock,
+            }
+
+        elif kind_normalized == "customers":
+            name = str(raw_row.get("name") or raw_row.get("customer_name") or "").strip()
+            phone = str(raw_row.get("phone") or raw_row.get("kontak") or "").strip()
+            email = str(raw_row.get("email") or "").strip()
+            address = str(raw_row.get("address") or raw_row.get("alamat") or "").strip()
+            customer_type = str(raw_row.get("customer_type") or raw_row.get("segment") or raw_row.get("channel") or "new").strip()
+
+            if not name:
+                errors.append("Nama pelanggan wajib diisi.")
+            if email and "@" not in email:
+                errors.append("Format email pelanggan tidak valid.")
+
+            parsed = {
+                "name": name, "phone": phone, "email": email, "address": address, "customer_type": customer_type,
+            }
+
+        elif kind_normalized == "suppliers":
+            name = str(raw_row.get("name") or raw_row.get("supplier_name") or "").strip()
+            contact_name = str(raw_row.get("contact_name") or raw_row.get("contact") or raw_row.get("pic") or "").strip()
+            phone = str(raw_row.get("phone") or raw_row.get("kontak") or "").strip()
+            email = str(raw_row.get("email") or "").strip()
+            address = str(raw_row.get("address") or raw_row.get("alamat") or "").strip()
+
+            if not name:
+                errors.append("Nama supplier/vendor wajib diisi.")
+            if email and "@" not in email:
+                errors.append("Format email supplier tidak valid.")
+
+            parsed = {
+                "name": name, "contact_name": contact_name, "phone": phone, "email": email, "address": address,
+            }
+
+        elif kind_normalized == "sales_orders":
+            sku = str(raw_row.get("variant_sku") or raw_row.get("sku") or "").strip()
+            qty = _coerce_float(raw_row.get("quantity") or raw_row.get("qty"), 1)
+            price = _coerce_float(raw_row.get("selling_price") or raw_row.get("price"), 0)
+            order_number = str(raw_row.get("order_number") or raw_row.get("invoice") or "").strip()
+            customer_name = str(raw_row.get("customer_name") or raw_row.get("buyer") or "Marketplace Buyer").strip()
+            sales_channel = str(raw_row.get("sales_channel") or raw_row.get("channel") or "Shopee").strip()
+            discount = _coerce_float(raw_row.get("discount"), 0)
+            shipping = _coerce_float(raw_row.get("shipping"), 0)
+            mp_fee = _coerce_float(raw_row.get("marketplace_fee") or raw_row.get("fee"), 0)
+            ad_cost = _coerce_float(raw_row.get("advertising_cost") or raw_row.get("ads"), 0)
+            date_val = str(raw_row.get("date") or "").strip() or now_iso()
+
+            if not sku:
+                errors.append("SKU varian wajib diisi.")
+            elif sku not in sku_to_product:
+                errors.append(f"SKU '{sku}' tidak ditemukan di katalog produk.")
+            else:
+                curr_stock = float(sku_to_product[sku]["variant"].get("stock", 0))
+                if curr_stock < qty:
+                    warnings.append(f"Stok SKU '{sku}' tersisa {curr_stock}, penjualan sebesar {qty} akan menyebabkan minus.")
+
+            if qty <= 0:
+                errors.append("Jumlah (quantity) harus lebih besar dari 0.")
+            if price < 0:
+                errors.append("Harga jual tidak boleh negatif.")
+
+            if order_number:
+                if order_number in seen_order_numbers_batch:
+                    warnings.append(f"No order '{order_number}' duplikat dalam batch ini (akan digabung / dibuat item baru).")
+                seen_order_numbers_batch.add(order_number)
+
+            parsed = {
+                "order_number": order_number, "date": date_val,
+                "customer_name": customer_name, "sales_channel": sales_channel,
+                "variant_sku": sku, "quantity": qty, "selling_price": price,
+                "discount": discount, "shipping": shipping,
+                "marketplace_fee": mp_fee, "advertising_cost": ad_cost,
+            }
+
+        elif kind_normalized == "opening_balance":
+            code = str(raw_row.get("account_code") or raw_row.get("code") or "").strip()
+            debit = _coerce_float(raw_row.get("debit"), 0)
+            credit = _coerce_float(raw_row.get("credit"), 0)
+
+            if not code:
+                errors.append("Kode akun COA wajib diisi.")
+            elif code not in accounts_by_code:
+                errors.append(f"Kode akun '{code}' tidak terdaftar di Chart of Accounts.")
+
+            if debit < 0 or credit < 0:
+                errors.append("Nilai debit/credit tidak boleh negatif.")
+            if debit == 0 and credit == 0:
+                errors.append("Setidaknya debit atau credit harus lebih besar dari 0.")
+            if debit > 0 and credit > 0:
+                errors.append("Satu baris tidak boleh memiliki debit dan credit sekaligus.")
+
+            parsed = {
+                "account_code": code,
+                "account_id": accounts_by_code.get(code, {}).get("id", ""),
+                "account_name": accounts_by_code.get(code, {}).get("name", ""),
+                "debit": debit,
+                "credit": credit,
+            }
+
+        is_valid = len(errors) == 0
+        validation_results.append({
+            "row_index": idx,
+            "is_valid": is_valid,
+            "errors": errors,
+            "warnings": warnings,
+            "raw": raw_row,
+            "parsed": parsed,
+        })
+
+    valid_count = sum(1 for r in validation_results if r["is_valid"])
+    invalid_count = len(validation_results) - valid_count
+
+    return {
+        "ok": True,
+        "kind": kind_normalized,
+        "total": len(validation_results),
+        "valid_count": valid_count,
+        "invalid_count": invalid_count,
+        "is_all_valid": invalid_count == 0,
+        "rows": validation_results,
+    }
+
+@api.post("/imports/preview")
+async def preview_import(body: ImportPreviewIn, user: dict = Depends(get_current_user)):
+    return await validate_import_rows(body.kind, body.rows)
+
+@api.post("/imports/execute")
+@transactional
+async def execute_import(body: ImportExecuteIn, user: dict = Depends(get_current_user)):
+    validation = await validate_import_rows(body.kind, body.rows)
+    kind = validation["kind"]
+
+    if not body.allow_partial and not validation["is_all_valid"]:
+        first_err = next(r for r in validation["rows"] if not r["is_valid"])
+        raise HTTPException(
+            status_code=400,
+            detail=f"Import dibatalkan (Strict Mode): Baris #{first_err['row_index']} gagal validasi: {'; '.join(first_err['errors'])}",
+        )
+
+    rows_to_process = [r["parsed"] for r in validation["rows"] if r["is_valid"]]
+    if not rows_to_process:
+        raise HTTPException(400, "Tidak ada data valid yang dapat diimpor.")
+
+    created_count = 0
+    updated_count = 0
 
     if kind == "products":
-        for row in rows:
-            name = str(row.get("name") or row.get("product_name") or "").strip()
-            sku = str(row.get("sku") or row.get("product_sku") or row.get("variant_sku") or "").strip()
-            if not name:
-                skipped.append({"row": row, "reason": "Missing product name"})
-                continue
-            product = await db.products.find_one({"name": name})
-            if product:
-                skipped.append({"name": name, "reason": "Product already exists"})
-                continue
-            variant_sku = sku or f"SKU-{new_id()[:6]}"
-            variant = {
-                "sku": variant_sku,
-                "color": str(row.get("color") or "").strip(),
-                "size": str(row.get("size") or "").strip(),
-                "stock": _coerce_float(row.get("stock"), 0),
-                "cost": _coerce_float(row.get("cost"), 0),
-                "selling_price": _coerce_float(row.get("selling_price"), 0),
-            }
+        for item in rows_to_process:
+            sku = item["sku"]
+            existing = await db.products.find_one({"variants.sku": sku})
+            if existing:
+                # update variant stock and price
+                variants = existing.get("variants", [])
+                for v in variants:
+                    if v.get("sku") == sku:
+                        before = float(v.get("stock", 0))
+                        v["stock"] = item["stock"]
+                        v["cost"] = item["cost"]
+                        v["selling_price"] = item["selling_price"]
+                        v["color"] = item["color"]
+                        v["size"] = item["size"]
+                        break
+                await db.products.update_one({"id": existing["id"]}, {"$set": {"variants": variants, "updated_at": now_iso()}})
+                if item["stock"] > 0:
+                    await record_movement("product", existing["id"], sku, item["stock"] - before, "initial", before, item["stock"], user["id"], "Import Product Stock Update")
+                updated_count += 1
+            else:
+                # Check if product with same name exists
+                prod_by_name = await db.products.find_one({"name": item["name"], "status": {"$ne": "archived"}})
+                variant_obj = {
+                    "sku": sku,
+                    "color": item["color"],
+                    "size": item["size"],
+                    "stock": item["stock"],
+                    "cost": item["cost"],
+                    "selling_price": item["selling_price"],
+                }
+                if prod_by_name:
+                    prod_by_name["variants"].append(variant_obj)
+                    await db.products.update_one({"id": prod_by_name["id"]}, {"$set": {"variants": prod_by_name["variants"], "updated_at": now_iso()}})
+                    if item["stock"] > 0:
+                        await record_movement("product", prod_by_name["id"], sku, item["stock"], "initial", 0, item["stock"], user["id"], "Import Product Variant")
+                    updated_count += 1
+                else:
+                    pid = new_id()
+                    doc = {
+                        "id": pid,
+                        "name": item["name"],
+                        "sku": sku,
+                        "category_id": item["category"],
+                        "brand": "NexaBiz",
+                        "status": "active",
+                        "minimum_stock": item["min_stock"],
+                        "cost": item["cost"],
+                        "selling_price": item["selling_price"],
+                        "variants": [variant_obj],
+                        "created_at": now_iso(),
+                        "updated_at": now_iso(),
+                    }
+                    await db.products.insert_one(doc)
+                    if item["stock"] > 0:
+                        await record_movement("product", pid, sku, item["stock"], "initial", 0, item["stock"], user["id"], "Import Product")
+                    created_count += 1
+        await audit(user, "import", "products", f"batch_{len(rows_to_process)}", None, {"created": created_count, "updated": updated_count})
+
+    elif kind == "materials":
+        for item in rows_to_process:
+            mid = new_id()
             doc = {
-                "id": new_id(),
-                "sku": sku or variant_sku,
-                "name": name,
-                "brand": str(row.get("brand") or "").strip(),
-                "category_id": str(row.get("category_id") or "").strip(),
+                "id": mid,
+                "name": item["name"],
+                "sku": item["sku"],
+                "category": item["category"],
+                "unit": item["unit"],
+                "cost": item["cost"],
+                "stock": item["stock"],
+                "minimum_stock": item["min_stock"],
                 "status": "active",
-                "minimum_stock": _coerce_float(row.get("minimum_stock"), 0),
-                "cost": _coerce_float(row.get("cost"), 0),
-                "selling_price": _coerce_float(row.get("selling_price"), 0),
-                "variants": [variant],
                 "created_at": now_iso(),
                 "updated_at": now_iso(),
             }
-            await db.products.insert_one(doc)
-            created += 1
-    elif kind in {"customers", "suppliers"}:
-        for row in rows:
-            name = str(row.get("name") or row.get("customer_name") or row.get("supplier_name") or "").strip()
-            if not name:
-                skipped.append({"row": row, "reason": "Missing name"})
-                continue
-            email = str(row.get("email") or "").strip()
-            phone = str(row.get("phone") or row.get("contact") or "").strip()
+            await db.materials.insert_one(doc)
+            if item["stock"] > 0:
+                await record_movement("material", mid, "initial", item["stock"], "initial", 0, item["stock"], user["id"], "Import Material Stock")
+            created_count += 1
+        await audit(user, "import", "materials", f"batch_{len(rows_to_process)}", None, {"created": created_count})
+
+    elif kind == "customers":
+        for item in rows_to_process:
+            cid = new_id()
             doc = {
-                "id": new_id(),
-                "name": name,
-                "email": email,
-                "phone": phone,
-                "address": str(row.get("address") or "").strip(),
-                "customer_type": str(row.get("segment") or row.get("customer_type") or "new").strip() or "new",
+                "id": cid,
+                "name": item["name"],
+                "phone": item["phone"],
+                "email": item["email"],
+                "address": item["address"],
+                "customer_type": item["customer_type"],
                 "total_orders": 0,
                 "total_spending": 0,
+                "status": "active",
                 "created_at": now_iso(),
                 "updated_at": now_iso(),
             }
-            if kind == "suppliers":
-                doc = {
-                    "id": new_id(),
-                    "name": name,
-                    "contact_name": str(row.get("contact_name") or "").strip(),
-                    "phone": phone,
-                    "email": email,
-                    "address": str(row.get("address") or "").strip(),
-                    "created_at": now_iso(),
-                    "updated_at": now_iso(),
-                }
-            if kind == "customers":
-                existing = await db.customers.find_one({"$or": [{"email": email}, {"phone": phone}, {"name": name}]}) if email or phone else await db.customers.find_one({"name": name})
-                if existing:
-                    skipped.append({"name": name, "reason": "Customer already exists"})
-                    continue
-                await db.customers.insert_one(doc)
-            else:
-                existing = await db.suppliers.find_one({"$or": [{"email": email}, {"phone": phone}, {"name": name}]}) if email or phone else await db.suppliers.find_one({"name": name})
-                if existing:
-                    skipped.append({"name": name, "reason": "Supplier already exists"})
-                    continue
-                await db.suppliers.insert_one(doc)
-            created += 1
-    else:
-        raise HTTPException(400, f"Unsupported import type: {kind}")
+            await db.customers.insert_one(doc)
+            created_count += 1
+        await audit(user, "import", "customers", f"batch_{len(rows_to_process)}", None, {"created": created_count})
 
-    return {"ok": True, "created": created, "skipped": skipped, "kind": kind}
+    elif kind == "suppliers":
+        for item in rows_to_process:
+            sid = new_id()
+            doc = {
+                "id": sid,
+                "name": item["name"],
+                "contact_name": item["contact_name"],
+                "phone": item["phone"],
+                "email": item["email"],
+                "address": item["address"],
+                "status": "active",
+                "created_at": now_iso(),
+                "updated_at": now_iso(),
+            }
+            await db.suppliers.insert_one(doc)
+            created_count += 1
+        await audit(user, "import", "suppliers", f"batch_{len(rows_to_process)}", None, {"created": created_count})
 
-# ---------- MARKETPLACE ORDER IMPORT ----------
+    elif kind == "sales_orders":
+        for item in rows_to_process:
+            sku = item["variant_sku"]
+            qty = item["quantity"]
+            prod = await db.products.find_one({"variants.sku": sku})
+            if not prod:
+                continue
+            variant = next(v for v in prod["variants"] if v["sku"] == sku)
+            before = float(variant.get("stock", 0))
+            after = before - qty
+            variant["stock"] = after
+            await db.products.update_one({"id": prod["id"]}, {"$set": {"variants": prod["variants"], "updated_at": now_iso()}})
+
+            subtotal = item["selling_price"] * qty
+            cogs = float(variant.get("cost", 0)) * qty
+            total = subtotal - item["discount"] + item["shipping"]
+            net = total - item["marketplace_fee"] - item["advertising_cost"] - cogs
+
+            sid = new_id()
+            onum = item["order_number"] or f"SO-IMP-{datetime.now().strftime('%y%m%d')}-{sid[:4].upper()}"
+            so_doc = {
+                "id": sid,
+                "order_number": onum,
+                "date": item["date"],
+                "customer_name": item["customer_name"],
+                "sales_channel": item["sales_channel"],
+                "items": [{
+                    "product_id": prod["id"],
+                    "product_name": prod["name"],
+                    "variant_sku": sku,
+                    "quantity": qty,
+                    "selling_price": item["selling_price"],
+                    "cost": float(variant.get("cost", 0)),
+                }],
+                "subtotal": subtotal,
+                "cogs": cogs,
+                "discount": item["discount"],
+                "voucher": 0,
+                "shipping": item["shipping"],
+                "marketplace_fee": item["marketplace_fee"],
+                "other_fee": 0,
+                "advertising_cost": item["advertising_cost"],
+                "total": total,
+                "net_profit": net,
+                "payment_status": "paid",
+                "fulfillment_status": "completed",
+                "imported": True,
+                "created_at": now_iso(),
+                "updated_at": now_iso(),
+            }
+            await db.sales_orders.insert_one(so_doc)
+            await record_movement("product", prod["id"], sku, -qty, "sales", before, after, user["id"], f"Import {onum}")
+            created_count += 1
+        await audit(user, "import", "sales_orders", f"batch_{len(rows_to_process)}", None, {"created": created_count})
+
+    elif kind == "opening_balance":
+        lines_payload = []
+        for item in rows_to_process:
+            lines_payload.append(OpeningBalanceLine(
+                account_id=item["account_id"],
+                debit=item["debit"],
+                credit=item["credit"],
+            ))
+        ob_in = OpeningBalanceIn(
+            as_of_date=datetime.now(timezone.utc).isoformat()[:10],
+            lines=lines_payload,
+            auto_balance=True,
+        )
+        res = await save_opening_balance(ob_in, user)
+        created_count = len(lines_payload)
+        await audit(user, "import", "opening_balance", f"batch_{len(rows_to_process)}", None, {"accounts_updated": created_count, "total": res.get("total")})
+
+    return {
+        "ok": True,
+        "kind": kind,
+        "created": created_count,
+        "updated": updated_count,
+        "skipped": [r for r in validation["rows"] if not r["is_valid"]],
+    }
+
+# Backward compatibility routes
+@api.post("/imports/csv")
+async def import_csv_rows_compat(body: Dict[str, Any], user: dict = Depends(get_current_user)):
+    kind = str(body.get("kind", "")).lower()
+    rows = body.get("rows") or []
+    return await execute_import(ImportExecuteIn(kind=kind, rows=rows, allow_partial=True), user)
+
 class ImportOrderIn(BaseModel):
     order_number: Optional[str] = None
     date: Optional[str] = None
@@ -1819,53 +2217,13 @@ class BulkImportIn(BaseModel):
 @api.post("/marketplace/import")
 @transactional
 async def import_marketplace_orders(body: BulkImportIn, user: dict = Depends(require_module("sales"))):
-    created = 0
-    skipped = []
-    for o in body.orders:
-        if o.order_number and await db.sales_orders.find_one({"order_number": o.order_number}):
-            skipped.append({"sku": o.variant_sku, "order_number": o.order_number, "reason": "Order already imported"})
-            continue
-        # find product by variant sku
-        p = await db.products.find_one({"variants.sku": o.variant_sku})
-        if not p:
-            skipped.append({"sku": o.variant_sku, "reason": "Product not found"})
-            continue
-        v = next((x for x in p["variants"] if x["sku"] == o.variant_sku), None)
-        if not v:
-            skipped.append({"sku": o.variant_sku, "reason": "Variant not found"})
-            continue
-        if float(v.get("stock", 0)) < o.quantity:
-            skipped.append({"sku": o.variant_sku, "reason": f"Insufficient stock ({v['stock']} available)"})
-            continue
-        # deduct stock
-        before = float(v["stock"])
-        v["stock"] = before - o.quantity
-        await db.products.update_one({"id": p["id"]}, {"$set": {"variants": p["variants"]}})
-        subtotal = o.selling_price * o.quantity
-        cogs = float(v.get("cost", 0)) * o.quantity
-        total = subtotal - float(o.discount or 0) + float(o.shipping or 0)
-        net = total - float(o.marketplace_fee or 0) - float(o.advertising_cost or 0) - cogs
-        sid = new_id()
-        onum = o.order_number or f"MP-{datetime.now().strftime('%y%m%d')}-{sid[:4].upper()}"
-        so = {
-            "id": sid, "order_number": onum,
-            "date": o.date or now_iso(),
-            "customer_name": o.customer_name or "Marketplace Buyer",
-            "sales_channel": o.sales_channel,
-            "items": [{"product_id": p["id"], "product_name": p["name"], "variant_sku": o.variant_sku, "quantity": o.quantity, "selling_price": o.selling_price, "cost": float(v.get("cost", 0))}],
-            "subtotal": subtotal, "cogs": cogs,
-            "discount": float(o.discount or 0), "voucher": 0, "shipping": float(o.shipping or 0),
-            "marketplace_fee": float(o.marketplace_fee or 0), "other_fee": 0,
-            "advertising_cost": float(o.advertising_cost or 0),
-            "total": total, "net_profit": net,
-            "payment_status": "paid", "fulfillment_status": "completed",
-            "imported": True,
-            "created_at": now_iso(), "updated_at": now_iso(),
-        }
-        await db.sales_orders.insert_one(so)
-        await record_movement("product", p["id"], o.variant_sku, -o.quantity, "sales", before, v["stock"], user["id"], f"Import {onum}")
-        created += 1
-    return {"created": created, "skipped": skipped}
+    raw_rows = [o.model_dump() for o in body.orders]
+    exec_res = await execute_import(ImportExecuteIn(kind="sales_orders", rows=raw_rows, allow_partial=True), user)
+    return {
+        "created": exec_res["created"],
+        "skipped": [{"sku": s["parsed"].get("variant_sku"), "reason": "; ".join(s["errors"])} for s in exec_res.get("skipped", [])],
+    }
+
 
 
 # ---------- MARKETPLACE SETTLEMENT ----------
