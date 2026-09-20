@@ -11,6 +11,14 @@ from fastapi import HTTPException
 from backend import server
 
 
+class ObjectId:
+    def __init__(self, value):
+        self.value = value
+
+    def __str__(self):
+        return self.value
+
+
 class BusinessInvariantTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         await server.init_db()
